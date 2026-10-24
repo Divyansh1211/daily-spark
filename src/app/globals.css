@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
+/* Always light: turquoise and white, even when the phone is in dark mode. */
 :root {
+  color-scheme: light;
   --background: #f3fafb;
   --foreground: #0f2a30;
   --card: #ffffff;
@@ -10,20 +12,6 @@
   --accent-soft: #dcf5f8;
   --hero: #d6f3f7;
   --hero-fg: #0b4652;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #071417;
-    --foreground: #e8f8fa;
-    --card: #0e2125;
-    --muted: #8fb3ba;
-    --line: #1d3a40;
-    --accent: #5fdde8;
-    --accent-soft: #0f3439;
-    --hero: #10303a;
-    --hero-fg: #d4f7fb;
-  }
 }
 
 @theme inline {
