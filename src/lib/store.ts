@@ -16,6 +16,13 @@ export type Reminder = {
   repeat: Repeat;
 };
 
+/** A device opted in to the quote sent when the day changes in its time zone. */
+export type DailyQuoteSetting = {
+  timeZone: string;
+  /** Local date (YYYY-MM-DD) of the last daily quote sent. */
+  lastSent: string;
+};
+
 export interface Store {
   saveSubscription(deviceId: string, sub: WebPushSubscription): Promise<void>;
   getSubscription(deviceId: string): Promise<WebPushSubscription | null>;
@@ -25,6 +32,10 @@ export interface Store {
   listReminders(deviceId: string): Promise<Reminder[]>;
   deleteReminder(deviceId: string, id: string): Promise<void>;
   dueReminders(now: number): Promise<Reminder[]>;
+  getDailyQuote(deviceId: string): Promise<DailyQuoteSetting | null>;
+  /** Pass null to opt the device out. */
+  setDailyQuote(deviceId: string, setting: DailyQuoteSetting | null): Promise<void>;
+  listDailyQuotes(): Promise<[deviceId: string, setting: DailyQuoteSetting][]>;
 }
 
 // Redis layout:
@@ -32,6 +43,7 @@ export interface Store {
 //   reminder:{id}          -> reminder JSON
 //   device:{deviceId}:rems -> set of reminder ids
 //   due                    -> sorted set of reminder ids, scored by `at`
+//   dailyquote             -> hash of deviceId -> daily quote setting JSON
 class RedisStore implements Store {
   constructor(private redis: Redis) {}
 
@@ -47,6 +59,7 @@ class RedisStore implements Store {
     const ids = await this.redis.smembers(`device:${deviceId}:rems`);
     const tx = this.redis.multi();
     tx.del(`sub:${deviceId}`, `device:${deviceId}:rems`);
+    tx.hdel("dailyquote", deviceId);
     for (const id of ids) {
       tx.del(`reminder:${id}`);
       tx.zrem("due", id);
@@ -87,12 +100,27 @@ class RedisStore implements Store {
     );
     return rows.filter((r): r is Reminder => r !== null);
   }
+
+  async getDailyQuote(deviceId: string) {
+    return this.redis.hget<DailyQuoteSetting>("dailyquote", deviceId);
+  }
+
+  async setDailyQuote(deviceId: string, setting: DailyQuoteSetting | null) {
+    if (setting) await this.redis.hset("dailyquote", { [deviceId]: setting });
+    else await this.redis.hdel("dailyquote", deviceId);
+  }
+
+  async listDailyQuotes() {
+    const all = await this.redis.hgetall<Record<string, DailyQuoteSetting>>("dailyquote");
+    return Object.entries(all ?? {});
+  }
 }
 
 // Local development fallback. Data lives in process memory and is lost on restart.
 class MemoryStore implements Store {
   protected subs = new Map<string, WebPushSubscription>();
   protected reminders = new Map<string, Reminder>();
+  protected dailyQuotes = new Map<string, DailyQuoteSetting>();
 
   /** Called after every write; FileStore persists here. */
   protected changed() {}
@@ -108,6 +136,7 @@ class MemoryStore implements Store {
 
   async deleteDevice(deviceId: string) {
     this.subs.delete(deviceId);
+    this.dailyQuotes.delete(deviceId);
     for (const [id, r] of this.reminders) {
       if (r.deviceId === deviceId) this.reminders.delete(id);
     }
@@ -133,6 +162,20 @@ class MemoryStore implements Store {
   async dueReminders(now: number) {
     return [...this.reminders.values()].filter((r) => r.at <= now);
   }
+
+  async getDailyQuote(deviceId: string) {
+    return this.dailyQuotes.get(deviceId) ?? null;
+  }
+
+  async setDailyQuote(deviceId: string, setting: DailyQuoteSetting | null) {
+    if (setting) this.dailyQuotes.set(deviceId, setting);
+    else this.dailyQuotes.delete(deviceId);
+    this.changed();
+  }
+
+  async listDailyQuotes() {
+    return [...this.dailyQuotes];
+  }
 }
 
 // Single-server deployments (e.g. a VM): memory store persisted to a JSON file.
@@ -143,9 +186,11 @@ class FileStore extends MemoryStore {
       const data = JSON.parse(readFileSync(file, "utf8")) as {
         subs: [string, WebPushSubscription][];
         reminders: [string, Reminder][];
+        dailyQuotes?: [string, DailyQuoteSetting][];
       };
       this.subs = new Map(data.subs);
       this.reminders = new Map(data.reminders);
+      this.dailyQuotes = new Map(data.dailyQuotes ?? []);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -156,7 +201,11 @@ class FileStore extends MemoryStore {
     const tmp = `${this.file}.tmp`;
     writeFileSync(
       tmp,
-      JSON.stringify({ subs: [...this.subs], reminders: [...this.reminders] }),
+      JSON.stringify({
+        subs: [...this.subs],
+        reminders: [...this.reminders],
+        dailyQuotes: [...this.dailyQuotes],
+      }),
     );
     // Rename is atomic, so a crash mid-write never leaves a half-written file.
     renameSync(tmp, this.file);

@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type FormEvent } from "react";
 import {
   deleteReminder,
+  getDailyQuote,
   listReminders,
   scheduleReminder,
   sendTestNotification,
+  setDailyQuote,
   subscribeUser,
   unsubscribeUser,
   type ReminderView,
 } from "./actions";
-import { BellIcon, CheckIcon, RepeatIcon, SendIcon, ShareIcon, TrashIcon } from "./icons";
+import { BellIcon, CheckIcon, RepeatIcon, SendIcon, ShareIcon, SunIcon, TrashIcon } from "./icons";
 
 type Support = "checking" | "supported" | "needs-install" | "unsupported";
 
@@ -42,6 +44,10 @@ function getSupport(): Support {
 
 const noSubscribe = () => () => {};
 
+function timeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 export function RemindersApp() {
   const support = useSyncExternalStore<Support>(noSubscribe, getSupport, () => "checking");
   const [subscription, setSubscription] = useState<PushSubscription | null>(null);
@@ -71,7 +77,7 @@ export function RemindersApp() {
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
       });
-      await subscribeUser(sub.toJSON());
+      await subscribeUser(sub.toJSON(), timeZone());
       setSubscription(sub);
     } catch (e) {
       console.error(e);
@@ -138,8 +144,51 @@ export function RemindersApp() {
           </section>
         ))}
 
+      {subscription && <DailyQuoteToggle endpoint={subscription.endpoint} />}
       {subscription && <Reminders endpoint={subscription.endpoint} />}
     </div>
+  );
+}
+
+function DailyQuoteToggle({ endpoint }: { endpoint: string }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    getDailyQuote(endpoint).then(setEnabled);
+  }, [endpoint]);
+
+  async function toggle() {
+    const next = !enabled;
+    setEnabled(next);
+    const result = await setDailyQuote(endpoint, next, timeZone());
+    if (!result.ok) setEnabled(!next);
+  }
+
+  return (
+    <Card className="flex items-center gap-4 py-4">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-lg text-accent">
+        <SunIcon />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">Daily quote at midnight</p>
+        <p className="text-xs text-muted">A fresh quote as soon as the new day starts.</p>
+      </div>
+      <button
+        role="switch"
+        aria-checked={enabled ?? false}
+        aria-label="Daily quote at midnight"
+        onClick={toggle}
+        disabled={enabled === null}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-300 disabled:opacity-50 ${
+          enabled ? "bg-accent" : "bg-line"
+        }`}
+      >
+        <span
+          className="absolute top-1 left-1 size-5 rounded-full bg-white shadow-sm transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+          style={{ transform: enabled ? "translateX(1.25rem)" : "none" }}
+        />
+      </button>
+    </Card>
   );
 }
 

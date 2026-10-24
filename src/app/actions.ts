@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { PushSubscription as WebPushSubscription } from "web-push";
-import { deviceIdFor, sendPush } from "@/lib/push";
+import { deviceIdFor, localDate, sendPush } from "@/lib/push";
 import { store, type Reminder, type Repeat } from "@/lib/store";
 
 export type ReminderView = Pick<Reminder, "id" | "title" | "body" | "at" | "repeat">;
@@ -17,12 +17,28 @@ function isSubscription(value: unknown): value is WebPushSubscription {
   );
 }
 
-export async function subscribeUser(sub: unknown) {
+function isTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Saves the device's push subscription and turns on the daily quote. */
+export async function subscribeUser(sub: unknown, timeZone: string) {
   if (!isSubscription(sub)) throw new Error("Invalid push subscription");
-  await store.saveSubscription(deviceIdFor(sub.endpoint), {
+  const deviceId = deviceIdFor(sub.endpoint);
+  await store.saveSubscription(deviceId, {
     endpoint: sub.endpoint,
     keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
   });
+  if (isTimeZone(timeZone) && !(await store.getDailyQuote(deviceId))) {
+    // Today counts as sent, so the first quote arrives when the next day starts.
+    await store.setDailyQuote(deviceId, { timeZone, lastSent: localDate(Date.now(), timeZone) });
+  }
   return { ok: true };
 }
 
@@ -79,5 +95,21 @@ export async function listReminders(endpoint: string): Promise<ReminderView[]> {
 
 export async function deleteReminder(endpoint: string, id: string) {
   await store.deleteReminder(deviceIdFor(endpoint), id);
+  return { ok: true };
+}
+
+export async function getDailyQuote(endpoint: string) {
+  return (await store.getDailyQuote(deviceIdFor(endpoint))) !== null;
+}
+
+export async function setDailyQuote(endpoint: string, enabled: boolean, timeZone: string) {
+  const deviceId = deviceIdFor(endpoint);
+  if (!(await store.getSubscription(deviceId))) return { ok: false };
+  if (!enabled) {
+    await store.setDailyQuote(deviceId, null);
+    return { ok: true };
+  }
+  if (!isTimeZone(timeZone)) return { ok: false };
+  await store.setDailyQuote(deviceId, { timeZone, lastSent: localDate(Date.now(), timeZone) });
   return { ok: true };
 }

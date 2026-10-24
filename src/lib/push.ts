@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import webpush, { type PushSubscription as WebPushSubscription, WebPushError } from "web-push";
+import { getDaily } from "./daily";
 import { store, type Reminder } from "./store";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -81,4 +82,37 @@ async function advance(reminder: Reminder, now: number) {
   } else {
     await store.deleteReminder(reminder.deviceId, reminder.id);
   }
+}
+
+/** Calendar date (YYYY-MM-DD) at `now` in an IANA time zone such as "Asia/Kolkata". */
+export function localDate(now: number, timeZone: string) {
+  // en-CA formats dates as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(now);
+}
+
+/** Sends the day's quote to every opted-in device whose local date has changed since the last one. */
+export async function sendDailyQuotes(now = Date.now()) {
+  let sent = 0;
+  let failed = 0;
+
+  for (const [deviceId, setting] of await store.listDailyQuotes()) {
+    const today = localDate(now, setting.timeZone);
+    if (today === setting.lastSent) continue;
+    // Mark it sent first so a failing push isn't retried on every tick.
+    await store.setDailyQuote(deviceId, { ...setting, lastSent: today });
+    try {
+      const { quote } = await getDaily(today);
+      const delivered = await sendPush(deviceId, {
+        title: "Today's spark ✨",
+        body: `“${quote.text}” — ${quote.author}`,
+        tag: "daily-quote",
+      });
+      if (delivered) sent++;
+    } catch (error) {
+      failed++;
+      console.error("[push] failed to send daily quote", deviceId, error);
+    }
+  }
+
+  return { sent, failed };
 }

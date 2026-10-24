@@ -16,7 +16,7 @@ type ZenQuote = { q: string; a: string };
 
 // Cached in memory so we stay well under ZenQuotes' free limit (5 requests / 30s).
 const cache = globalThis as unknown as {
-  __zenToday?: { date: string; quote: Quote };
+  __zenDays?: Map<string, Quote>;
   __zenBatch?: { fetchedAt: number; quotes: Quote[] };
 };
 
@@ -35,9 +35,19 @@ async function fetchZen(path: string): Promise<Quote[]> {
 
 /** ZenQuotes' quote of the day, fetched once per date. */
 async function zenToday(date: string) {
-  if (cache.__zenToday?.date === date) return cache.__zenToday.quote;
-  const [quote] = await fetchZen("today");
-  cache.__zenToday = { date, quote };
+  const days = (cache.__zenDays ??= new Map());
+  const cached = days.get(date);
+  if (cached) return cached;
+
+  let [quote] = await fetchZen("today");
+  // ZenQuotes' day doesn't start at midnight in every time zone, so right after midnight
+  // it can still return yesterday's quote. Pick another one so each day gets a new quote.
+  if ([...days.values()].some((q) => q.text === quote.text)) {
+    const batch = await zenBatch();
+    quote = batch.find((q) => ![...days.values()].some((d) => d.text === q.text)) ?? quote;
+  }
+  days.set(date, quote);
+  if (days.size > 7) days.delete(days.keys().next().value!);
   return quote;
 }
 
