@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f6fb;
+  --foreground: #15151f;
+  --card: #ffffff;
+  --muted: #6c6c82;
+  --line: #e6e6f0;
+  --accent: #5b4cf5;
+  --accent-soft: #ecebff;
+  --hero: #e9e7fd;
+  --hero-fg: #24205a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a12;
+    --foreground: #ededf5;
+    --card: #14141f;
+    --muted: #9b9bb3;
+    --line: #26263a;
+    --accent: #8b80ff;
+    --accent-soft: #1f1d3d;
+    --hero: #1b1a30;
+    --hero-fg: #e4e1ff;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-hero: var(--hero);
+  --color-hero-fg: var(--hero-fg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-instrument-serif);
+
+  --animate-rise: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade: fade 0.4s ease-out both;
+  --animate-wiggle: wiggle 2.4s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-ping-soft: ping-soft 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes wiggle {
+    0%,
+    70%,
+    100% {
+      transform: rotate(0);
+    }
+    75% {
+      transform: rotate(-14deg);
+    }
+    80% {
+      transform: rotate(12deg);
+    }
+    85% {
+      transform: rotate(-8deg);
+    }
+    90% {
+      transform: rotate(5deg);
+    }
+  }
+  @keyframes shimmer {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  @keyframes ping-soft {
+    75%,
+    100% {
+      transform: scale(2.2);
+      opacity: 0;
+    }
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.skeleton {
+  background: var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
