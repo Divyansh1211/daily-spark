@@ -1,13 +1,15 @@
-// In local development there is no external cron, so poll for due reminders here.
+// Polls for due reminders in-process: always in local development, and in production
+// when ENABLE_SCHEDULER=true (long-running servers such as a VM, where no external cron is needed).
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NODE_ENV !== "development") return;
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  if (process.env.NODE_ENV !== "development" && process.env.ENABLE_SCHEDULER !== "true") return;
 
   const { sendDueReminders } = await import("@/lib/push");
   const g = globalThis as unknown as { __reminderTicker?: NodeJS.Timeout };
   if (g.__reminderTicker) clearInterval(g.__reminderTicker);
 
   g.__reminderTicker = setInterval(() => {
-    sendDueReminders().catch((error) => console.error("[dev scheduler]", error));
+    sendDueReminders().catch((error) => console.error("[scheduler]", error));
   }, 15_000);
-  console.log("[dev scheduler] checking for due reminders every 15s");
+  console.log("[scheduler] checking for due reminders every 15s");
 }

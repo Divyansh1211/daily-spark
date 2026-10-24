@@ -1,4 +1,6 @@
 import "server-only";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { Redis } from "@upstash/redis";
 import type { PushSubscription as WebPushSubscription } from "web-push";
 
@@ -89,11 +91,15 @@ class RedisStore implements Store {
 
 // Local development fallback. Data lives in process memory and is lost on restart.
 class MemoryStore implements Store {
-  private subs = new Map<string, WebPushSubscription>();
-  private reminders = new Map<string, Reminder>();
+  protected subs = new Map<string, WebPushSubscription>();
+  protected reminders = new Map<string, Reminder>();
+
+  /** Called after every write; FileStore persists here. */
+  protected changed() {}
 
   async saveSubscription(deviceId: string, sub: WebPushSubscription) {
     this.subs.set(deviceId, sub);
+    this.changed();
   }
 
   async getSubscription(deviceId: string) {
@@ -105,10 +111,12 @@ class MemoryStore implements Store {
     for (const [id, r] of this.reminders) {
       if (r.deviceId === deviceId) this.reminders.delete(id);
     }
+    this.changed();
   }
 
   async saveReminder(reminder: Reminder) {
     this.reminders.set(reminder.id, reminder);
+    this.changed();
   }
 
   async listReminders(deviceId: string) {
@@ -119,10 +127,39 @@ class MemoryStore implements Store {
 
   async deleteReminder(deviceId: string, id: string) {
     if (this.reminders.get(id)?.deviceId === deviceId) this.reminders.delete(id);
+    this.changed();
   }
 
   async dueReminders(now: number) {
     return [...this.reminders.values()].filter((r) => r.at <= now);
+  }
+}
+
+// Single-server deployments (e.g. a VM): memory store persisted to a JSON file.
+class FileStore extends MemoryStore {
+  constructor(private file: string) {
+    super();
+    try {
+      const data = JSON.parse(readFileSync(file, "utf8")) as {
+        subs: [string, WebPushSubscription][];
+        reminders: [string, Reminder][];
+      };
+      this.subs = new Map(data.subs);
+      this.reminders = new Map(data.reminders);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+
+  protected changed() {
+    mkdirSync(dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.tmp`;
+    writeFileSync(
+      tmp,
+      JSON.stringify({ subs: [...this.subs], reminders: [...this.reminders] }),
+    );
+    // Rename is atomic, so a crash mid-write never leaves a half-written file.
+    renameSync(tmp, this.file);
   }
 }
 
@@ -131,9 +168,10 @@ function createStore(): Store {
     (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) ||
     (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
   if (hasRedis) return new RedisStore(Redis.fromEnv());
+  if (process.env.DATA_FILE) return new FileStore(process.env.DATA_FILE);
   if (process.env.NODE_ENV === "production") {
     console.warn(
-      "[store] No Upstash Redis env vars set; using in-memory store. Reminders will not persist.",
+      "[store] Neither Upstash Redis nor DATA_FILE is set; using in-memory store. Reminders will not persist.",
     );
   }
   return new MemoryStore();
