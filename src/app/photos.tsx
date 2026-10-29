@@ -3,7 +3,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { unlockPhotos } from "./actions";
-import { ChevronLeftIcon, ChevronRightIcon, ImageIcon, LockIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
+import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, LockIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
 import { notifyPhotosChanged, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
 
 export function Photos() {
@@ -107,11 +107,17 @@ function Gallery({ photos }: { photos: Photo[] }) {
         <p className="text-sm text-muted">
           {photos.length === 0 ? "No photos yet" : `${photos.length} ${photos.length === 1 ? "photo" : "photos"}`}
         </p>
-        <label className={`${primaryButton} inline-flex cursor-pointer items-center gap-1.5 py-2.5`}>
-          <PlusIcon className="text-base" /> Add photos
-          {/* On phones this offers both "Take Photo" and the photo library. */}
-          <input type="file" accept="image/*" multiple onChange={add} className="sr-only" />
-        </label>
+        <div className="flex gap-2">
+          <label className={`${secondaryButton} inline-flex cursor-pointer items-center gap-1.5 py-2.5`}>
+            <CameraIcon className="text-base" /> Camera
+            {/* `capture` opens the camera directly; Android's gallery picker has no camera option. */}
+            <input type="file" accept="image/*" capture="environment" onChange={add} className="sr-only" />
+          </label>
+          <label className={`${primaryButton} inline-flex cursor-pointer items-center gap-1.5 py-2.5`}>
+            <PlusIcon className="text-base" /> Gallery
+            <input type="file" accept="image/*" multiple onChange={add} className="sr-only" />
+          </label>
+        </div>
       </div>
 
       {error && <p className="animate-rise px-1 text-sm text-red-500">{error}</p>}
@@ -247,5 +253,7 @@ function Viewer({
 
 const primaryButton =
   "rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60";
+const secondaryButton =
+  "rounded-xl bg-accent-soft px-4 py-3 text-sm font-semibold text-accent transition-all duration-200 active:scale-[0.98]";
 const viewerButton =
   "flex h-10 min-w-10 items-center justify-center rounded-full bg-white/10 text-lg transition-colors active:scale-95";
