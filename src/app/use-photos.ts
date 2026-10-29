@@ -61,31 +61,53 @@ export function usePhotos() {
   return state;
 }
 
+function toJpeg(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't encode photo"))), "image/jpeg", quality),
+  );
+}
+
+/** Draws `source` into a new canvas whose longest side is at most `maxSide`. */
+function scaled(source: CanvasImageSource, width: number, height: number, maxSide: number) {
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  canvas.getContext("2d")!.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
 /**
- * Shrinks a photo in the browser and re-encodes it as JPEG. Drawing through an <img>
- * applies the camera's EXIF rotation, and it turns iPhone HEIC photos into JPEG.
+ * Makes the upload-sized photo and its thumbnail as JPEGs. Drawing through an <img> applies
+ * the camera's EXIF rotation and turns iPhone HEIC photos into JPEG.
+ *
+ * Phone photos can be 50 megapixels (~200 MB once decoded), and running out of memory makes
+ * the phone kill the page, so the original is decoded once and released straight away, and
+ * the thumbnail is made from the already-shrunk copy.
  */
-export async function resizeImage(file: Blob, maxSide: number, quality: number): Promise<Blob> {
+export async function shrinkPhoto(file: Blob) {
   const url = URL.createObjectURL(file);
+  let full: HTMLCanvasElement;
   try {
     const img = new Image();
     img.src = url;
     await img.decode();
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(img.naturalWidth * scale);
-    canvas.height = Math.round(img.naturalHeight * scale);
-    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-    return await new Promise((resolve, reject) =>
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't encode photo"))), "image/jpeg", quality),
-    );
+    full = scaled(img, img.naturalWidth, img.naturalHeight, 1600);
+    img.src = "";
   } finally {
     URL.revokeObjectURL(url);
+  }
+  const thumb = scaled(full, full.width, full.height, 480);
+  try {
+    return { photo: await toJpeg(full, 0.85), thumb: await toJpeg(thumb, 0.8) };
+  } finally {
+    // Zero-sized canvases give their pixel memory back immediately (Safari holds on otherwise).
+    full.width = full.height = thumb.width = thumb.height = 0;
   }
 }
 
 export async function uploadPhoto(file: File) {
-  const [photo, thumb] = await Promise.all([resizeImage(file, 1600, 0.85), resizeImage(file, 480, 0.8)]);
+  const { photo, thumb } = await shrinkPhoto(file);
   const form = new FormData();
   form.append("photo", photo, "photo.jpg");
   form.append("thumb", thumb, "thumb.jpg");
