@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { Daily } from "@/lib/daily";
-import { CheckIcon, FlameIcon, ShareIcon, ShuffleIcon } from "./icons";
+import { CheckIcon, FlameIcon, ImageIcon, ShareIcon, ShuffleIcon } from "./icons";
+import { photoUrl, usePhotos } from "./use-photos";
 
 /** The user's local calendar date as YYYY-MM-DD. */
 function localDate() {
@@ -122,6 +123,8 @@ export function Today() {
         )}
       </section>
 
+      <PhotoOfTheDay date={daily.date} />
+
       {/* Pep talk */}
       <section className="animate-rise rounded-3xl border border-line bg-card p-6 [animation-delay:120ms]">
         <div className="flex items-center justify-between">
@@ -219,5 +222,25 @@ function TodaySkeleton() {
       <div className="skeleton animate-shimmer h-72 rounded-3xl" />
       <div className="skeleton animate-shimmer h-80 rounded-3xl" />
     </div>
+  );
+}
+
+/** One of the shared photos, a different one each day. Hidden until photos are unlocked and added. */
+function PhotoOfTheDay({ date }: { date: string }) {
+  const state = usePhotos();
+  if (state.status !== "ready" || state.photos.length === 0) return null;
+
+  const [y, m, d] = date.split("-").map(Number);
+  const day = Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
+  const photo = state.photos[day % state.photos.length];
+
+  return (
+    <section className="animate-rise relative overflow-hidden rounded-3xl bg-line">
+      {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
+      <img src={photoUrl(photo.id, "full")} alt="" className="max-h-[28rem] w-full object-cover" />
+      <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-white/85 px-3 py-1 text-xs font-medium text-hero-fg backdrop-blur">
+        <ImageIcon /> Photo of the day
+      </span>
+    </section>
   );
 }

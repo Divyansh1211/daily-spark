@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { PushSubscription as WebPushSubscription } from "web-push";
+import { grantAccess } from "@/lib/access";
 import { deviceIdFor, localDate, sendPush } from "@/lib/push";
 import { store, type Reminder, type Repeat } from "@/lib/store";
 
@@ -112,4 +113,11 @@ export async function setDailyQuote(endpoint: string, enabled: boolean, timeZone
   if (!isTimeZone(timeZone)) return { ok: false };
   await store.setDailyQuote(deviceId, { timeZone, lastSent: localDate(Date.now(), timeZone) });
   return { ok: true };
+}
+
+export async function unlockPhotos(code: string) {
+  if (typeof code !== "string" || code.length > 100) {
+    return { ok: false as const, error: "That code isn't right." };
+  }
+  return grantAccess(code);
 }

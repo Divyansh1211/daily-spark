@@ -20,11 +20,11 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "Daily Spark",
+  title: "haanji",
   description: "Daily quotes, pep talks and reminders.",
   appleWebApp: {
     capable: true,
-    title: "Daily Spark",
+    title: "haanji",
     statusBarStyle: "default",
   },
   icons: {

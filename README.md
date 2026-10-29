@@ -1,4 +1,4 @@
-# Daily Spark
+# haanji
 
 An installable Next.js PWA with a daily quote (from ZenQuotes) and pep talk, plus reminders delivered as push notifications, including on iPhone (iOS 16.4+, after adding to the Home Screen).
 
@@ -37,7 +37,7 @@ npm run dev -- --experimental-https
 
 1. Open the app's URL in **Safari**.
 2. Tap **Share → Add to Home Screen**.
-3. Open **Daily Spark** from the Home Screen and tap **Enable notifications**.
+3. Open **haanji** from the Home Screen and tap **Enable notifications**.
 
 Notifications don't work from a normal Safari tab, only from the Home Screen app.
 

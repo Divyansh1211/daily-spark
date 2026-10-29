@@ -103,7 +103,7 @@ export async function sendDailyQuotes(now = Date.now()) {
     try {
       const { quote } = await getDaily(today);
       const delivered = await sendPush(deviceId, {
-        title: "Today's spark ✨",
+        title: "haanji ✨",
         body: `“${quote.text}” — ${quote.author}`,
         tag: "daily-quote",
       });
