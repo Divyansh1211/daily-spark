@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { unlockPhotos } from "./actions";
 import { ChevronLeftIcon, ChevronRightIcon, ImageIcon, LockIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
 import { notifyPhotosChanged, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
@@ -173,6 +174,15 @@ function Viewer({
     return () => window.removeEventListener("keydown", onKey);
   }, [index, photos.length, onIndex, onClose]);
 
+  // Stop the page behind from scrolling while the viewer is open.
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
   async function remove() {
     if (!confirming) return setConfirming(true);
     await fetch(`/api/photos/${photo.id}`, { method: "DELETE" });
@@ -180,8 +190,10 @@ function Viewer({
     notifyPhotosChanged();
   }
 
-  return (
-    <div className="animate-fade fixed inset-0 z-50 flex flex-col bg-black/95 text-white">
+  // Rendered into <body>: the tab panels animate with transforms, and a transformed
+  // ancestor would pin this "fixed" overlay to the panel instead of the screen.
+  return createPortal(
+    <div className="animate-fade fixed inset-0 z-50 flex flex-col bg-black text-white">
       <div className="flex items-center justify-between px-4 pt-[max(1rem,env(safe-area-inset-top))]">
         <button onClick={onClose} aria-label="Close" className={viewerButton}>
           <XIcon />
@@ -199,14 +211,12 @@ function Viewer({
         </button>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center p-4">
+      <div key={photo.id} className="relative min-h-0 flex-1">
+        {/* The thumbnail is usually cached, so it shows instantly while the full photo loads on top. */}
         {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
-        <img
-          key={photo.id}
-          src={photoUrl(photo.id, "full")}
-          alt=""
-          className="animate-fade max-h-full max-w-full rounded-xl object-contain"
-        />
+        <img src={photoUrl(photo.id, "thumb")} alt="" className="absolute inset-0 size-full object-contain" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
+        <img src={photoUrl(photo.id, "full")} alt="" className="absolute inset-0 size-full object-contain" />
       </div>
 
       <div className="flex items-center justify-between px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
@@ -230,7 +240,8 @@ function Viewer({
           <ChevronRightIcon />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
