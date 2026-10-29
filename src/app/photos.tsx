@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { unlockPhotos } from "./actions";
+import { Camera, canUseInAppCamera } from "./camera";
 import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, LockIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
 import { notifyPhotosChanged, notifyUnlocked, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
 
@@ -77,12 +78,23 @@ function Gallery({ photos }: { photos: Photo[] }) {
   const [uploading, setUploading] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  const [camera, setCamera] = useState(false);
+  const phoneCamera = useRef<HTMLInputElement>(null);
   // Newest first in the grid.
   const shown = [...photos].reverse();
 
-  async function add(e: ChangeEvent<HTMLInputElement>) {
+  function add(e: ChangeEvent<HTMLInputElement>) {
     const files = [...(e.target.files ?? [])];
     e.target.value = "";
+    upload(files);
+  }
+
+  function openCamera() {
+    if (canUseInAppCamera()) setCamera(true);
+    else phoneCamera.current?.click();
+  }
+
+  async function upload(files: Blob[]) {
     if (files.length === 0) return;
     setError(null);
     setUploading((n) => n + files.length);
@@ -108,11 +120,11 @@ function Gallery({ photos }: { photos: Photo[] }) {
           {photos.length === 0 ? "No photos yet" : `${photos.length} ${photos.length === 1 ? "photo" : "photos"}`}
         </p>
         <div className="flex gap-2">
-          <label className={`${secondaryButton} inline-flex cursor-pointer items-center gap-1.5 py-2.5`}>
+          <button onClick={openCamera} className={`${secondaryButton} inline-flex items-center gap-1.5 py-2.5`}>
             <CameraIcon className="text-base" /> Camera
-            {/* `capture` opens the camera directly; Android's gallery picker has no camera option. */}
-            <input type="file" accept="image/*" capture="environment" onChange={add} className="sr-only" />
-          </label>
+          </button>
+          {/* Fallback when the in-app camera can't run: `capture` opens the phone's camera app. */}
+          <input ref={phoneCamera} type="file" accept="image/*" capture="environment" onChange={add} className="sr-only" />
           <label className={`${primaryButton} inline-flex cursor-pointer items-center gap-1.5 py-2.5`}>
             <PlusIcon className="text-base" /> Gallery
             <input type="file" accept="image/*" multiple onChange={add} className="sr-only" />
@@ -147,6 +159,17 @@ function Gallery({ photos }: { photos: Photo[] }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {camera && (
+        <Camera
+          onCapture={(photo) => upload([photo])}
+          onClose={() => setCamera(false)}
+          onFallback={() => {
+            setCamera(false);
+            phoneCamera.current?.click();
+          }}
+        />
       )}
 
       {open !== null && shown[open] && (

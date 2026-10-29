@@ -106,7 +106,7 @@ export async function shrinkPhoto(file: Blob) {
   }
 }
 
-export async function uploadPhoto(file: File) {
+export async function uploadPhoto(file: Blob) {
   const { photo, thumb } = await shrinkPhoto(file);
   const form = new FormData();
   form.append("photo", photo, "photo.jpg");
