@@ -4,7 +4,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { unlockPhotos } from "./actions";
 import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, LockIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
-import { notifyPhotosChanged, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
+import { notifyPhotosChanged, notifyUnlocked, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
 
 export function Photos() {
   const state = usePhotos();
@@ -29,7 +29,7 @@ export function Photos() {
   return <Gallery photos={state.photos} />;
 }
 
-function Unlock() {
+export function Unlock({ what = "see and add photos" }: { what?: string }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ function Unlock() {
     setError(null);
     try {
       const result = await unlockPhotos(code);
-      if (result.ok) notifyPhotosChanged();
+      if (result.ok) notifyUnlocked();
       else setError(result.error);
     } finally {
       setBusy(false);
@@ -54,7 +54,7 @@ function Unlock() {
       </div>
       <h2 className="mt-4 font-serif text-2xl">Just for us</h2>
       <p className="mx-auto mt-1 max-w-64 text-sm text-muted">
-        Enter the code once on this phone to see and add photos.
+        Enter the code once on this phone to {what}.
       </p>
       <input
         required
@@ -252,7 +252,7 @@ function Viewer({
 }
 
 const primaryButton =
-  "rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60";
+  "rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60";
 const secondaryButton =
   "rounded-xl bg-accent-soft px-4 py-3 text-sm font-semibold text-accent transition-all duration-200 active:scale-[0.98]";
 const viewerButton =

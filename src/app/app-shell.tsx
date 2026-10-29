@@ -1,16 +1,26 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { BellIcon, ImageIcon, SunIcon } from "./icons";
+import { Expenses } from "./expenses";
+import { BellIcon, ImageIcon, SunIcon, WalletIcon } from "./icons";
 import { Photos } from "./photos";
 import { RemindersApp } from "./reminders-app";
+import { ThemeToggle } from "./theme-toggle";
 import { Today } from "./today";
 
 const TABS = [
   { id: "today", label: "Today", Icon: SunIcon },
   { id: "photos", label: "Photos", Icon: ImageIcon },
+  { id: "expenses", label: "Expenses", Icon: WalletIcon },
   { id: "reminders", label: "Reminders", Icon: BellIcon },
 ] as const;
+
+const HEADINGS = {
+  today: { title: "Haanji", subtitle: null },
+  photos: { title: "Photos", subtitle: "Our little moments" },
+  expenses: { title: "Expenses", subtitle: "Just for you" },
+  reminders: { title: "Reminders", subtitle: "Stay on track" },
+} as const;
 
 type Tab = (typeof TABS)[number]["id"];
 
@@ -32,13 +42,16 @@ export function AppShell() {
   return (
     <>
       <main className="mx-auto w-full max-w-md flex-1 px-5 pb-32 pt-[max(2.5rem,env(safe-area-inset-top))]">
-        <header className="mb-6">
-          <p key={`hello-${tab}`} className="animate-fade text-sm font-medium text-muted">
-            {tab === "today" ? hello : tab === "photos" ? "Our little moments" : "Stay on track"}
-          </p>
-          <h1 key={`title-${tab}`} className="animate-rise font-serif text-4xl tracking-tight">
-            {tab === "today" ? "haanji" : tab === "photos" ? "Photos" : "Reminders"}
-          </h1>
+        <header className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p key={`hello-${tab}`} className="animate-fade text-sm font-medium text-muted">
+              {HEADINGS[tab].subtitle ?? hello}
+            </p>
+            <h1 key={`title-${tab}`} className="animate-rise font-serif text-4xl tracking-tight">
+              {HEADINGS[tab].title}
+            </h1>
+          </div>
+          <ThemeToggle />
         </header>
 
         {/* Both stay mounted so switching tabs keeps state; un-hiding replays the rise animation. */}
@@ -47,6 +60,9 @@ export function AppShell() {
         </div>
         <div hidden={tab !== "photos"} className="animate-rise">
           <Photos />
+        </div>
+        <div hidden={tab !== "expenses"} className="animate-rise">
+          <Expenses />
         </div>
         <div hidden={tab !== "reminders"} className="animate-rise">
           <RemindersApp />
@@ -70,11 +86,11 @@ export function AppShell() {
                 key={id}
                 onClick={() => setTab(id)}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-medium transition-colors duration-300 active:scale-95 ${
+                className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-2 text-[11px] font-medium transition-colors duration-300 active:scale-95 ${
                   active ? "text-accent" : "text-muted"
                 }`}
               >
-                <Icon className={`text-lg transition-transform duration-300 ${active ? "scale-110" : ""}`} />
+                <Icon className={`text-xl transition-transform duration-300 ${active ? "scale-110" : ""}`} />
                 {label}
               </button>
             );

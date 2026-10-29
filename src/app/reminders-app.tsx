@@ -423,6 +423,6 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 const input =
   "w-full rounded-xl border border-line bg-background px-4 py-3 text-base outline-none transition-shadow placeholder:text-muted focus:border-accent focus:ring-4 focus:ring-accent/15";
 const primaryButton =
-  "rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60";
+  "rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60";
 const ghostButton =
   "shrink-0 rounded-full px-3 py-1.5 text-sm font-medium text-muted ring-1 ring-inset ring-line transition-colors hover:text-foreground active:scale-95";

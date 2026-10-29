@@ -238,7 +238,7 @@ function PhotoOfTheDay({ date }: { date: string }) {
     <section className="animate-rise relative overflow-hidden rounded-3xl bg-line">
       {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
       <img src={photoUrl(photo.id, "full")} alt="" className="max-h-[28rem] w-full object-cover" />
-      <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-white/85 px-3 py-1 text-xs font-medium text-hero-fg backdrop-blur">
+      <span className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-card/85 px-3 py-1 text-xs font-medium text-foreground backdrop-blur">
         <ImageIcon /> Photo of the day
       </span>
     </section>

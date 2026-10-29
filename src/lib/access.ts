@@ -1,9 +1,11 @@
 import "server-only";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
 // Photos are private: a browser gets access once someone types ACCESS_CODE on it.
 const COOKIE = "haanji_access";
+// Random id for this browser; keeps each person's expenses separate.
+const OWNER_COOKIE = "haanji_me";
 const MAX_FAILURES = 10;
 const FAILURE_WINDOW_MS = 10 * 60 * 1000;
 
@@ -55,4 +57,20 @@ export async function grantAccess(code: string) {
     path: "/",
   });
   return { ok: true as const };
+}
+
+/** This browser's private owner id, created on first use. Call from a server action. */
+export async function ownerId() {
+  const jar = await cookies();
+  const existing = jar.get(OWNER_COOKIE)?.value;
+  if (existing && /^[0-9a-f]{32}$/.test(existing)) return existing;
+  const id = randomBytes(16).toString("hex");
+  jar.set(OWNER_COOKIE, id, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 400 * 24 * 60 * 60,
+    path: "/",
+  });
+  return id;
 }

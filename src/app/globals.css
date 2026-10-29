@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
-/* Always light: turquoise and white, even when the phone is in dark mode. */
+/* `dark:` follows the in-app theme toggle, not the phone's setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Light turquoise and white by default; dark only when chosen with the header toggle. */
 :root {
   color-scheme: light;
   --background: #f3fafb;
@@ -12,6 +15,21 @@
   --accent-soft: #dcf5f8;
   --hero: #d6f3f7;
   --hero-fg: #0b4652;
+  --on-accent: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #071417;
+  --foreground: #e8f8fa;
+  --card: #0e2125;
+  --muted: #8fb3ba;
+  --line: #1d3a40;
+  --accent: #5fdde8;
+  --accent-soft: #0f3439;
+  --hero: #10303a;
+  --hero-fg: #d4f7fb;
+  --on-accent: #071417;
 }
 
 @theme inline {
@@ -24,6 +42,7 @@
   --color-accent-soft: var(--accent-soft);
   --color-hero: var(--hero);
   --color-hero-fg: var(--hero-fg);
+  --color-on-accent: var(--on-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-serif: var(--font-instrument-serif);

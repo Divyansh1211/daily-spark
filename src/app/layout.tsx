@@ -20,11 +20,11 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "haanji",
+  title: "Haanji",
   description: "Daily quotes, pep talks and reminders.",
   appleWebApp: {
     capable: true,
-    title: "haanji",
+    title: "Haanji",
     statusBarStyle: "default",
   },
   icons: {
@@ -43,8 +43,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
+      // The inline script below may set data-theme before React hydrates.
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
     >
+      <head>
+        {/* Applies the saved theme before the first paint so dark mode doesn't flash white. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem("haanji-theme")==="dark")document.documentElement.dataset.theme="dark"}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
