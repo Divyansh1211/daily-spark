@@ -259,24 +259,28 @@ function AddExpense({ onAdded }: { onAdded: () => void }) {
         ))}
       </div>
 
-      <div className="flex gap-2">
+      <label className="block">
+        <span className={fieldLabel}>Note (optional)</span>
         <input
           maxLength={80}
-          placeholder="Note (optional)"
+          placeholder="e.g. Dosa with Purvi"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          className={`${input} min-w-0 flex-1`}
+          className={input}
         />
+      </label>
+      <label className="block">
+        <span className={fieldLabel}>Date</span>
+        {/* Phones give date inputs a fixed built-in width; min-w-0 and appearance-none let it fit the card. */}
         <input
           type="date"
           required
           max={today()}
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          aria-label="Date"
-          className={`${input} w-36 shrink-0 px-3`}
+          className={`${input} block min-w-0 appearance-none text-left [&::-webkit-date-and-time-value]:text-left`}
         />
-      </div>
+      </label>
 
       {error && <p className="animate-rise text-sm text-red-500">{error}</p>}
       <button type="submit" disabled={saving} className={`${primaryButton} w-full`}>
@@ -463,6 +467,7 @@ function ExpenseList({ summary, onChange }: { summary: MonthSummary; onChange: (
 
 const input =
   "w-full rounded-xl border border-line bg-background px-4 py-3 text-base text-foreground outline-none transition-shadow placeholder:text-muted focus:border-accent focus:ring-4 focus:ring-accent/15";
+const fieldLabel = "mb-1.5 block px-1 text-xs font-medium text-muted";
 const primaryButton =
   "rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent transition-all duration-200 hover:brightness-110 active:scale-[0.98] disabled:opacity-60";
 const roundButton =
