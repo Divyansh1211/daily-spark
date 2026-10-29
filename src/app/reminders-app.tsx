@@ -44,6 +44,14 @@ function getSupport(): Support {
 
 const noSubscribe = () => () => {};
 
+/** The next full hour as a datetime-local value, e.g. "2026-10-30T18:00". */
+function nextHour() {
+  const d = new Date();
+  d.setHours(d.getHours() + 1, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+}
+
 function timeZone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
@@ -196,7 +204,8 @@ function Reminders({ endpoint }: { endpoint: string }) {
   const [reminders, setReminders] = useState<ReminderView[]>([]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [when, setWhen] = useState("");
+  // Pre-filled because phones show an empty date-time field as a blank box.
+  const [when, setWhen] = useState(nextHour);
   const [repeat, setRepeat] = useState<"none" | "daily">("none");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -228,7 +237,7 @@ function Reminders({ endpoint }: { endpoint: string }) {
       }
       setTitle("");
       setBody("");
-      setWhen("");
+      setWhen(nextHour());
       setRepeat("none");
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 1600);
@@ -278,13 +287,17 @@ function Reminders({ endpoint }: { endpoint: string }) {
             onChange={(e) => setBody(e.target.value)}
             className={input}
           />
-          <input
-            required
-            type="datetime-local"
-            value={when}
-            onChange={(e) => setWhen(e.target.value)}
-            className={input}
-          />
+          <label className="block">
+            <span className="mb-1.5 block px-1 text-xs font-medium text-muted">When</span>
+            {/* Phones give date inputs a fixed built-in width and collapse them when empty. */}
+            <input
+              required
+              type="datetime-local"
+              value={when}
+              onChange={(e) => setWhen(e.target.value)}
+              className={`${input} block min-h-12 min-w-0 appearance-none text-left [&::-webkit-date-and-time-value]:text-left`}
+            />
+          </label>
 
           <div className="relative grid grid-cols-2 rounded-xl bg-background p-1 ring-1 ring-inset ring-line">
             <span

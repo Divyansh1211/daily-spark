@@ -278,7 +278,7 @@ function AddExpense({ onAdded }: { onAdded: () => void }) {
           max={today()}
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className={`${input} block min-w-0 appearance-none text-left [&::-webkit-date-and-time-value]:text-left`}
+          className={`${input} block min-h-12 min-w-0 appearance-none text-left [&::-webkit-date-and-time-value]:text-left`}
         />
       </label>
 
