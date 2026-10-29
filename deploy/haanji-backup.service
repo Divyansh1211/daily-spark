@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up Haanji photos, expenses and reminders
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+EnvironmentFile=-/home/ubuntu/.haanji-backup.env
+ExecStart=/home/ubuntu/daily-spark/scripts/backup.sh

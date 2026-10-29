@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Haanji backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Kolkata
+# Runs at the next boot if the server was off at 3:30.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
