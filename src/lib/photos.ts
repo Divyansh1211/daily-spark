@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 // Photos live on disk next to the data file (or in .data/photos locally):
-//   {id}.jpg        full size, resized in the browser to at most 1600px
+//   {id}.jpg        full size, resized in the browser to at most 2560px
 //   {id}.thumb.jpg  thumbnail for the grid
 const DIR =
   process.env.PHOTOS_DIR ??

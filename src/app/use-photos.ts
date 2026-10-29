@@ -92,14 +92,14 @@ export async function shrinkPhoto(file: Blob) {
     const img = new Image();
     img.src = url;
     await img.decode();
-    full = scaled(img, img.naturalWidth, img.naturalHeight, 1600);
+    full = scaled(img, img.naturalWidth, img.naturalHeight, 2560);
     img.src = "";
   } finally {
     URL.revokeObjectURL(url);
   }
   const thumb = scaled(full, full.width, full.height, 480);
   try {
-    return { photo: await toJpeg(full, 0.85), thumb: await toJpeg(thumb, 0.8) };
+    return { photo: await toJpeg(full, 0.9), thumb: await toJpeg(thumb, 0.8) };
   } finally {
     // Zero-sized canvases give their pixel memory back immediately (Safari holds on otherwise).
     full.width = full.height = thumb.width = thumb.height = 0;
