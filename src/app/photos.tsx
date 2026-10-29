@@ -191,7 +191,40 @@ function Viewer({
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const drag = useRef<{ x: number; y: number; horizontal: boolean | null } | null>(null);
   const photo = photos[index];
+  const hasPrev = index > 0;
+  const hasNext = index < photos.length - 1;
+
+  // Swipe left/right to change photo. The photo follows the finger, and resists at either end.
+  function onPointerDown(e: React.PointerEvent) {
+    drag.current = { x: e.clientX, y: e.clientY, horizontal: null };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    const d = drag.current;
+    if (!d) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    // Decide the direction once the finger has moved a little.
+    if (d.horizontal === null && Math.hypot(dx, dy) > 8) d.horizontal = Math.abs(dx) > Math.abs(dy);
+    if (!d.horizontal) return;
+    const atEnd = (dx > 0 && !hasPrev) || (dx < 0 && !hasNext);
+    setDragX(atEnd ? dx / 4 : dx);
+  }
+
+  function onPointerUp() {
+    const d = drag.current;
+    drag.current = null;
+    if (d?.horizontal) {
+      const threshold = Math.min(80, window.innerWidth * 0.18);
+      if (dragX < -threshold && hasNext) onIndex(index + 1);
+      else if (dragX > threshold && hasPrev) onIndex(index - 1);
+    }
+    setDragX(0);
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -240,18 +273,39 @@ function Viewer({
         </button>
       </div>
 
-      <div key={photo.id} className="relative min-h-0 flex-1">
+      <div
+        key={photo.id}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        // touch-none: the swipe is ours, not the browser's back/forward or scroll gesture.
+        className={`animate-fade relative min-h-0 flex-1 touch-none select-none ${
+          dragX === 0 ? "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]" : ""
+        }`}
+        style={{ transform: dragX ? `translateX(${dragX}px)` : undefined }}
+      >
         {/* The thumbnail is usually cached, so it shows instantly while the full photo loads on top. */}
         {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
-        <img src={photoUrl(photo.id, "thumb")} alt="" className="absolute inset-0 size-full object-contain" />
+        <img
+          src={photoUrl(photo.id, "thumb")}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 size-full object-contain"
+        />
         {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
-        <img src={photoUrl(photo.id, "full")} alt="" className="absolute inset-0 size-full object-contain" />
+        <img
+          src={photoUrl(photo.id, "full")}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 size-full object-contain"
+        />
       </div>
 
       <div className="flex items-center justify-between px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <button
           onClick={() => onIndex(index - 1)}
-          disabled={index === 0}
+          disabled={!hasPrev}
           aria-label="Previous photo"
           className={`${viewerButton} disabled:opacity-0`}
         >
@@ -262,7 +316,7 @@ function Viewer({
         </span>
         <button
           onClick={() => onIndex(index + 1)}
-          disabled={index === photos.length - 1}
+          disabled={!hasNext}
           aria-label="Next photo"
           className={`${viewerButton} disabled:opacity-0`}
         >
