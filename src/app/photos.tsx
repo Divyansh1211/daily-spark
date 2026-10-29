@@ -66,7 +66,7 @@ export function Unlock({ what = "see and add photos" }: { what?: string }) {
         className="mt-5 w-full rounded-xl border border-line bg-background px-4 py-3 text-center text-base tracking-widest outline-none transition-shadow placeholder:tracking-normal placeholder:text-muted focus:border-accent focus:ring-4 focus:ring-accent/15"
       />
       <button type="submit" disabled={busy} className={`${primaryButton} mt-3 w-full`}>
-        {busy ? "Checking…" : "Unlock photos"}
+        {busy ? "Checking…" : "Unlock"}
       </button>
       {error && <p className="animate-rise mt-3 text-sm text-red-500">{error}</p>}
     </form>
