@@ -45,7 +45,7 @@ export function AuthScreen() {
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 py-[max(2.5rem,env(safe-area-inset-top))]">
       <p className="animate-fade text-sm font-medium text-muted">Welcome</p>
-      <h1 className="animate-rise font-serif text-5xl tracking-tight">Space</h1>
+      <h1 className="animate-rise font-serif text-5xl tracking-tight">Haanji</h1>
       <p className="animate-rise mt-2 text-sm text-muted">
         {mode === "register"
           ? "Make your account once. If you ever reinstall the app, just log in and everything is still here."

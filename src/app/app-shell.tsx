@@ -18,7 +18,7 @@ const TABS = [
 ] as const;
 
 const HEADINGS = {
-  today: { title: "Space", subtitle: null },
+  today: { title: "Haanji", subtitle: null },
   photos: { title: "Photos", subtitle: "Our little moments" },
   expenses: { title: "Expenses", subtitle: "Just for you" },
   reminders: { title: "Reminders", subtitle: "Stay on track" },
