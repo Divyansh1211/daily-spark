@@ -17,6 +17,7 @@ async function icon(size, fill) {
   const y = Math.floor((size - art.info.height) / 2);
   return sharp(art.data)
     .extend({ left: x, right: size - art.info.width - x, top: y, bottom: size - art.info.height - y, background: PAPER })
+    .ensureAlpha()
     .png()
     .toBuffer();
 }
