@@ -17,14 +17,6 @@ export function notifyPhotosChanged() {
   window.dispatchEvent(new Event(CHANGED));
 }
 
-// Fired when the access code is entered, so every locked section reloads.
-export const UNLOCKED = "haanji:unlocked";
-
-export function notifyUnlocked() {
-  window.dispatchEvent(new Event(UNLOCKED));
-  notifyPhotosChanged();
-}
-
 export function photoUrl(id: string, size: "full" | "thumb") {
   return size === "thumb" ? `/api/photos/${id}?size=thumb` : `/api/photos/${id}`;
 }

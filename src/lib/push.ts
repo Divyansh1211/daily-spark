@@ -59,14 +59,23 @@ export async function sendDueReminders(now = Date.now()) {
   let failed = 0;
 
   for (const reminder of due) {
-    try {
-      if (await sendPush(reminder.deviceId, { title: reminder.title, body: reminder.body, tag: reminder.id })) {
-        sent++;
+    const devices = reminder.userId
+      ? await store.listUserDevices(reminder.userId)
+      : reminder.deviceId
+        ? [reminder.deviceId]
+        : [];
+    let delivered = false;
+    for (const deviceId of devices) {
+      try {
+        if (await sendPush(deviceId, { title: reminder.title, body: reminder.body, tag: reminder.id })) {
+          delivered = true;
+        }
+      } catch (error) {
+        failed++;
+        console.error("[push] failed to send reminder", reminder.id, error);
       }
-    } catch (error) {
-      failed++;
-      console.error("[push] failed to send reminder", reminder.id, error);
     }
+    if (delivered) sent++;
     await advance(reminder, now);
   }
 
@@ -80,7 +89,7 @@ async function advance(reminder: Reminder, now: number) {
     while (next <= now) next += DAY_MS;
     await store.saveReminder({ ...reminder, at: next });
   } else {
-    await store.deleteReminder(reminder.deviceId, reminder.id);
+    await store.deleteReminder(reminder.id);
   }
 }
 

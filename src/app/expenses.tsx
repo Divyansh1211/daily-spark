@@ -5,8 +5,7 @@ import { CATEGORIES, category, formatINR, type CategoryId } from "@/lib/expense-
 import type { MonthSummary } from "@/lib/expenses";
 import { addExpenseAction, deleteExpenseAction, loadExpenses, saveBudgetAction } from "./expense-actions";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, TrashIcon } from "./icons";
-import { Unlock } from "./photos";
-import { UNLOCKED } from "./use-photos";
+import { SignedOut } from "./auth-screen";
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -56,11 +55,7 @@ export function Expenses() {
   useEffect(() => {
     // Deferred so the first load doesn't set state synchronously inside the effect.
     const first = setTimeout(refresh, 0);
-    window.addEventListener(UNLOCKED, refresh);
-    return () => {
-      clearTimeout(first);
-      window.removeEventListener(UNLOCKED, refresh);
-    };
+    return () => clearTimeout(first);
   }, [refresh]);
 
   if (state.status === "loading" || !month) {
@@ -71,7 +66,7 @@ export function Expenses() {
       </div>
     );
   }
-  if (state.status === "locked") return <Unlock what="keep track of your expenses" />;
+  if (state.status === "locked") return <SignedOut />;
   if (state.status === "error") {
     return (
       <div className="animate-rise rounded-3xl border border-line bg-card p-6 text-sm">

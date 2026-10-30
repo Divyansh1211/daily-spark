@@ -1,17 +1,17 @@
-import { hasAccess } from "@/lib/access";
+import { currentUser } from "@/lib/auth";
 import { listPhotos, savePhoto } from "@/lib/photos";
 
 const MAX_FULL_BYTES = 8 * 1024 * 1024;
 const MAX_THUMB_BYTES = 1024 * 1024;
 
 export async function GET() {
-  if (!(await hasAccess())) return Response.json({ error: "Locked" }, { status: 401 });
+  if (!(await currentUser())) return Response.json({ error: "Locked" }, { status: 401 });
   return Response.json({ photos: await listPhotos() });
 }
 
 // Expects multipart form data with `photo` and `thumb`, both JPEGs made in the browser.
 export async function POST(request: Request) {
-  if (!(await hasAccess())) return Response.json({ error: "Locked" }, { status: 401 });
+  if (!(await currentUser())) return Response.json({ error: "Locked" }, { status: 401 });
 
   const form = await request.formData().catch(() => null);
   const photo = form?.get("photo");

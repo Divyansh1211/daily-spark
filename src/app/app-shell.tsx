@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import type { User } from "@/lib/auth";
+import { AccountMenu } from "./account-menu";
 import { Expenses } from "./expenses";
 import { BellIcon, ImageIcon, SunIcon, WalletIcon } from "./icons";
 import { Photos } from "./photos";
@@ -34,7 +36,7 @@ function greeting() {
   return "Good evening";
 }
 
-export function AppShell() {
+export function AppShell({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>("today");
   const hello = useSyncExternalStore(noSubscribe, greeting, () => "Hello");
   const activeIndex = TABS.findIndex((t) => t.id === tab);
@@ -51,7 +53,10 @@ export function AppShell() {
               {HEADINGS[tab].title}
             </h1>
           </div>
-          <ThemeToggle />
+          <div className="flex gap-2">
+            <ThemeToggle />
+            <AccountMenu user={user} />
+          </div>
         </header>
 
         {/* Both stay mounted so switching tabs keeps state; un-hiding replays the rise animation. */}

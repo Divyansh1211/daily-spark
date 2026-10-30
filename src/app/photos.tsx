@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
-import { unlockPhotos } from "./actions";
+import { SignedOut } from "./auth-screen";
 import { Camera, canUseInAppCamera } from "./camera";
-import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, LockIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
-import { notifyPhotosChanged, notifyUnlocked, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
+import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
+import { notifyPhotosChanged, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
 
 export function Photos() {
   const state = usePhotos();
@@ -19,7 +19,7 @@ export function Photos() {
       </div>
     );
   }
-  if (state.status === "locked") return <Unlock />;
+  if (state.status === "locked") return <SignedOut />;
   if (state.status === "error") {
     return (
       <div className="animate-rise rounded-3xl border border-line bg-card p-6 text-sm">
@@ -28,50 +28,6 @@ export function Photos() {
     );
   }
   return <Gallery photos={state.photos} />;
-}
-
-export function Unlock({ what = "see and add photos" }: { what?: string }) {
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await unlockPhotos(code);
-      if (result.ok) notifyUnlocked();
-      else setError(result.error);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="rounded-3xl border border-line bg-card p-6 text-center">
-      <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-accent-soft text-3xl text-accent">
-        <LockIcon />
-      </div>
-      <h2 className="mt-4 font-serif text-2xl">Just for us</h2>
-      <p className="mx-auto mt-1 max-w-64 text-sm text-muted">
-        Enter the code once on this phone to {what}.
-      </p>
-      <input
-        required
-        autoComplete="off"
-        autoCapitalize="none"
-        placeholder="Code"
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-        className="mt-5 w-full rounded-xl border border-line bg-background px-4 py-3 text-center text-base tracking-widest outline-none transition-shadow placeholder:tracking-normal placeholder:text-muted focus:border-accent focus:ring-4 focus:ring-accent/15"
-      />
-      <button type="submit" disabled={busy} className={`${primaryButton} mt-3 w-full`}>
-        {busy ? "Checking…" : "Unlock"}
-      </button>
-      {error && <p className="animate-rise mt-3 text-sm text-red-500">{error}</p>}
-    </form>
-  );
 }
 
 function Gallery({ photos }: { photos: Photo[] }) {

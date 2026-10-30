@@ -8,7 +8,10 @@ export type Repeat = "none" | "daily";
 
 export type Reminder = {
   id: string;
-  deviceId: string;
+  /** Owner; the reminder goes to every device they have notifications on. */
+  userId?: string;
+  /** Only on reminders made before accounts, until someone logs in on that device. */
+  deviceId?: string;
   title: string;
   body: string;
   /** Next fire time, epoch ms. */
@@ -24,13 +27,19 @@ export type DailyQuoteSetting = {
 };
 
 export interface Store {
-  saveSubscription(deviceId: string, sub: WebPushSubscription): Promise<void>;
+  /** Saves the device's push subscription and links the device to the person logged in on it. */
+  saveSubscription(deviceId: string, sub: WebPushSubscription, userId: string): Promise<void>;
   getSubscription(deviceId: string): Promise<WebPushSubscription | null>;
-  /** Removes the subscription and every reminder belonging to the device. */
+  /** Devices where this person has notifications on. */
+  listUserDevices(userId: string): Promise<string[]>;
+  /** Removes the subscription, its daily quote and any reminders made on it before accounts. */
   deleteDevice(deviceId: string): Promise<void>;
   saveReminder(reminder: Reminder): Promise<void>;
-  listReminders(deviceId: string): Promise<Reminder[]>;
-  deleteReminder(deviceId: string, id: string): Promise<void>;
+  listReminders(userId: string): Promise<Reminder[]>;
+  /** With userId, only deletes the reminder if it belongs to them. */
+  deleteReminder(id: string, userId?: string): Promise<void>;
+  /** Gives reminders made on this device before accounts to the person now using it. */
+  claimReminders(deviceId: string, userId: string): Promise<void>;
   dueReminders(now: number): Promise<Reminder[]>;
   getDailyQuote(deviceId: string): Promise<DailyQuoteSetting | null>;
   /** Pass null to opt the device out. */
@@ -40,26 +49,42 @@ export interface Store {
 
 // Redis layout:
 //   sub:{deviceId}         -> push subscription JSON
+//   deviceuser             -> hash of deviceId -> userId
+//   user:{userId}:devices  -> set of deviceIds
 //   reminder:{id}          -> reminder JSON
-//   device:{deviceId}:rems -> set of reminder ids
+//   user:{userId}:rems     -> set of reminder ids
+//   device:{deviceId}:rems -> set of reminder ids made before accounts
 //   due                    -> sorted set of reminder ids, scored by `at`
 //   dailyquote             -> hash of deviceId -> daily quote setting JSON
 class RedisStore implements Store {
   constructor(private redis: Redis) {}
 
-  async saveSubscription(deviceId: string, sub: WebPushSubscription) {
-    await this.redis.set(`sub:${deviceId}`, sub);
+  async saveSubscription(deviceId: string, sub: WebPushSubscription, userId: string) {
+    const previous = await this.redis.hget<string>("deviceuser", deviceId);
+    const tx = this.redis.multi();
+    tx.set(`sub:${deviceId}`, sub);
+    tx.hset("deviceuser", { [deviceId]: userId });
+    if (previous && previous !== userId) tx.srem(`user:${previous}:devices`, deviceId);
+    tx.sadd(`user:${userId}:devices`, deviceId);
+    await tx.exec();
   }
 
   async getSubscription(deviceId: string) {
     return this.redis.get<WebPushSubscription>(`sub:${deviceId}`);
   }
 
+  async listUserDevices(userId: string) {
+    return this.redis.smembers(`user:${userId}:devices`);
+  }
+
   async deleteDevice(deviceId: string) {
     const ids = await this.redis.smembers(`device:${deviceId}:rems`);
+    const userId = await this.redis.hget<string>("deviceuser", deviceId);
     const tx = this.redis.multi();
     tx.del(`sub:${deviceId}`, `device:${deviceId}:rems`);
     tx.hdel("dailyquote", deviceId);
+    tx.hdel("deviceuser", deviceId);
+    if (userId) tx.srem(`user:${userId}:devices`, deviceId);
     for (const id of ids) {
       tx.del(`reminder:${id}`);
       tx.zrem("due", id);
@@ -70,25 +95,44 @@ class RedisStore implements Store {
   async saveReminder(reminder: Reminder) {
     const tx = this.redis.multi();
     tx.set(`reminder:${reminder.id}`, reminder);
-    tx.sadd(`device:${reminder.deviceId}:rems`, reminder.id);
+    tx.sadd(reminder.userId ? `user:${reminder.userId}:rems` : `device:${reminder.deviceId}:rems`, reminder.id);
     tx.zadd("due", { score: reminder.at, member: reminder.id });
     await tx.exec();
   }
 
-  async listReminders(deviceId: string) {
-    const ids = await this.redis.smembers(`device:${deviceId}:rems`);
+  private async remindersIn(key: string) {
+    const ids = await this.redis.smembers(key);
     if (ids.length === 0) return [];
     const rows = await this.redis.mget<(Reminder | null)[]>(
       ...ids.map((id) => `reminder:${id}`),
     );
-    return rows.filter((r): r is Reminder => r !== null).sort((a, b) => a.at - b.at);
+    return rows.filter((r): r is Reminder => r !== null);
   }
 
-  async deleteReminder(deviceId: string, id: string) {
+  async listReminders(userId: string) {
+    return (await this.remindersIn(`user:${userId}:rems`)).sort((a, b) => a.at - b.at);
+  }
+
+  async deleteReminder(id: string, userId?: string) {
+    const reminder = await this.redis.get<Reminder>(`reminder:${id}`);
+    if (!reminder || (userId && reminder.userId !== userId)) return;
     const tx = this.redis.multi();
     tx.del(`reminder:${id}`);
-    tx.srem(`device:${deviceId}:rems`, id);
+    tx.srem(reminder.userId ? `user:${reminder.userId}:rems` : `device:${reminder.deviceId}:rems`, id);
     tx.zrem("due", id);
+    await tx.exec();
+  }
+
+  async claimReminders(deviceId: string, userId: string) {
+    const reminders = await this.remindersIn(`device:${deviceId}:rems`);
+    if (reminders.length === 0) return;
+    const tx = this.redis.multi();
+    for (const reminder of reminders) {
+      // JSON drops the undefined deviceId.
+      tx.set(`reminder:${reminder.id}`, { ...reminder, deviceId: undefined, userId });
+      tx.sadd(`user:${userId}:rems`, reminder.id);
+    }
+    tx.del(`device:${deviceId}:rems`);
     await tx.exec();
   }
 
@@ -119,14 +163,16 @@ class RedisStore implements Store {
 // Local development fallback. Data lives in process memory and is lost on restart.
 class MemoryStore implements Store {
   protected subs = new Map<string, WebPushSubscription>();
+  protected deviceUsers = new Map<string, string>();
   protected reminders = new Map<string, Reminder>();
   protected dailyQuotes = new Map<string, DailyQuoteSetting>();
 
   /** Called after every write; FileStore persists here. */
   protected changed() {}
 
-  async saveSubscription(deviceId: string, sub: WebPushSubscription) {
+  async saveSubscription(deviceId: string, sub: WebPushSubscription, userId: string) {
     this.subs.set(deviceId, sub);
+    this.deviceUsers.set(deviceId, userId);
     this.changed();
   }
 
@@ -134,11 +180,16 @@ class MemoryStore implements Store {
     return this.subs.get(deviceId) ?? null;
   }
 
+  async listUserDevices(userId: string) {
+    return [...this.deviceUsers].filter(([, u]) => u === userId).map(([deviceId]) => deviceId);
+  }
+
   async deleteDevice(deviceId: string) {
     this.subs.delete(deviceId);
+    this.deviceUsers.delete(deviceId);
     this.dailyQuotes.delete(deviceId);
     for (const [id, r] of this.reminders) {
-      if (r.deviceId === deviceId) this.reminders.delete(id);
+      if (!r.userId && r.deviceId === deviceId) this.reminders.delete(id);
     }
     this.changed();
   }
@@ -148,15 +199,27 @@ class MemoryStore implements Store {
     this.changed();
   }
 
-  async listReminders(deviceId: string) {
+  async listReminders(userId: string) {
     return [...this.reminders.values()]
-      .filter((r) => r.deviceId === deviceId)
+      .filter((r) => r.userId === userId)
       .sort((a, b) => a.at - b.at);
   }
 
-  async deleteReminder(deviceId: string, id: string) {
-    if (this.reminders.get(id)?.deviceId === deviceId) this.reminders.delete(id);
+  async deleteReminder(id: string, userId?: string) {
+    const reminder = this.reminders.get(id);
+    if (!reminder || (userId && reminder.userId !== userId)) return;
+    this.reminders.delete(id);
     this.changed();
+  }
+
+  async claimReminders(deviceId: string, userId: string) {
+    let claimed = false;
+    for (const [id, { deviceId: device, ...reminder }] of this.reminders) {
+      if (reminder.userId || device !== deviceId) continue;
+      this.reminders.set(id, { ...reminder, userId });
+      claimed = true;
+    }
+    if (claimed) this.changed();
   }
 
   async dueReminders(now: number) {
@@ -185,10 +248,12 @@ class FileStore extends MemoryStore {
     try {
       const data = JSON.parse(readFileSync(file, "utf8")) as {
         subs: [string, WebPushSubscription][];
+        deviceUsers?: [string, string][];
         reminders: [string, Reminder][];
         dailyQuotes?: [string, DailyQuoteSetting][];
       };
       this.subs = new Map(data.subs);
+      this.deviceUsers = new Map(data.deviceUsers ?? []);
       this.reminders = new Map(data.reminders);
       this.dailyQuotes = new Map(data.dailyQuotes ?? []);
     } catch (error) {
@@ -203,6 +268,7 @@ class FileStore extends MemoryStore {
       tmp,
       JSON.stringify({
         subs: [...this.subs],
+        deviceUsers: [...this.deviceUsers],
         reminders: [...this.reminders],
         dailyQuotes: [...this.dailyQuotes],
       }),

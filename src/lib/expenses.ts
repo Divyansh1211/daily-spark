@@ -28,19 +28,19 @@ export function shiftMonth(month: string, delta: number) {
 }
 
 export function addExpense(owner: string, e: Omit<Expense, "id">) {
-  db.prepare(
+  db().prepare(
     "INSERT INTO expenses (id, owner, amount, category, note, spent_on, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   ).run(randomUUID(), owner, e.amount, e.category, e.note, e.spentOn, Date.now());
 }
 
 export function deleteExpense(owner: string, id: string) {
-  db.prepare("DELETE FROM expenses WHERE owner = ? AND id = ?").run(owner, id);
+  db().prepare("DELETE FROM expenses WHERE owner = ? AND id = ?").run(owner, id);
 }
 
 export function setBudget(owner: string, amount: number | null) {
-  if (amount === null) db.prepare("DELETE FROM budgets WHERE owner = ?").run(owner);
+  if (amount === null) db().prepare("DELETE FROM budgets WHERE owner = ?").run(owner);
   else
-    db.prepare(
+    db().prepare(
       "INSERT INTO budgets (owner, amount) VALUES (?, ?) ON CONFLICT (owner) DO UPDATE SET amount = excluded.amount",
     ).run(owner, amount);
 }
@@ -49,7 +49,7 @@ export function monthSummary(owner: string, month: string): MonthSummary {
   const start = `${month}-01`;
   const end = `${shiftMonth(month, 1)}-01`;
 
-  const expenses = db
+  const expenses = db()
     .prepare(
       `SELECT id, amount, category, note, spent_on AS spentOn FROM expenses
        WHERE owner = ? AND spent_on >= ? AND spent_on < ?
@@ -57,7 +57,7 @@ export function monthSummary(owner: string, month: string): MonthSummary {
     )
     .all(owner, start, end) as Expense[];
 
-  const byCategory = db
+  const byCategory = db()
     .prepare(
       `SELECT category, SUM(amount) AS total FROM expenses
        WHERE owner = ? AND spent_on >= ? AND spent_on < ?
@@ -66,7 +66,7 @@ export function monthSummary(owner: string, month: string): MonthSummary {
     .all(owner, start, end) as { category: string; total: number }[];
 
   const firstTrendMonth = shiftMonth(month, -5);
-  const rows = db
+  const rows = db()
     .prepare(
       `SELECT substr(spent_on, 1, 7) AS month, SUM(amount) AS total FROM expenses
        WHERE owner = ? AND spent_on >= ? AND spent_on < ?
@@ -78,7 +78,7 @@ export function monthSummary(owner: string, month: string): MonthSummary {
     return { month: m, total: rows.find((r) => r.month === m)?.total ?? 0 };
   });
 
-  const budget = db.prepare("SELECT amount FROM budgets WHERE owner = ?").get(owner) as
+  const budget = db().prepare("SELECT amount FROM budgets WHERE owner = ?").get(owner) as
     | { amount: number }
     | undefined;
 

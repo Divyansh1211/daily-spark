@@ -67,7 +67,11 @@ export function RemindersApp() {
     navigator.serviceWorker
       .register("/sw.js", { scope: "/", updateViaCache: "none" })
       .then((reg) => reg.pushManager?.getSubscription())
-      .then((sub) => setSubscription(sub ?? null))
+      .then((sub) => {
+        setSubscription(sub ?? null);
+        // Links this phone to the account, so reminders made here before accounts carry over.
+        if (sub) subscribeUser(sub.toJSON(), timeZone()).catch(console.error);
+      })
       .catch((e) => console.error("Service worker registration failed", e));
   }, []);
 
@@ -129,7 +133,7 @@ export function RemindersApp() {
               </span>
               <div>
                 <p className="text-sm font-medium">Notifications are on</p>
-                <p className="text-xs text-muted">Reminders will reach this device.</p>
+                <p className="text-xs text-muted">Your reminders will reach this phone.</p>
               </div>
             </div>
             <button onClick={disable} disabled={busy} className={ghostButton}>
@@ -213,7 +217,7 @@ function Reminders({ endpoint }: { endpoint: string }) {
   const [justSaved, setJustSaved] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const refresh = useCallback(() => listReminders(endpoint).then(setReminders), [endpoint]);
+  const refresh = useCallback(() => listReminders().then(setReminders), []);
 
   useEffect(() => {
     refresh();
@@ -230,7 +234,7 @@ function Reminders({ endpoint }: { endpoint: string }) {
     const at = new Date(when).getTime();
     setSaving(true);
     try {
-      const result = await scheduleReminder({ endpoint, title, body, at, repeat });
+      const result = await scheduleReminder({ title, body, at, repeat });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -257,7 +261,7 @@ function Reminders({ endpoint }: { endpoint: string }) {
     setRemoving(id);
     // Let the exit animation play before the item disappears.
     await new Promise((r) => setTimeout(r, 250));
-    await deleteReminder(endpoint, id);
+    await deleteReminder(id);
     await refresh();
     setRemoving(null);
   }

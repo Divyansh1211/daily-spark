@@ -1,6 +1,6 @@
 "use server";
 
-import { hasAccess, ownerId } from "@/lib/access";
+import { currentUser } from "@/lib/auth";
 import { isCategory } from "@/lib/expense-categories";
 import { addExpense, deleteExpense, monthSummary, setBudget, type MonthSummary } from "@/lib/expenses";
 
@@ -19,18 +19,20 @@ function toPaise(rupees: string) {
 export async function loadExpenses(
   month: string,
 ): Promise<{ status: "locked" } | { status: "ready"; summary: MonthSummary }> {
-  if (!(await hasAccess())) return { status: "locked" };
+  const user = await currentUser();
+  if (!user) return { status: "locked" };
   if (!MONTH.test(month)) throw new Error("Invalid month");
-  return { status: "ready", summary: monthSummary(await ownerId(), month) };
+  return { status: "ready", summary: monthSummary(user.id, month) };
 }
 
 export async function addExpenseAction(input: { amount: string; category: string; note: string; date: string }) {
-  if (!(await hasAccess())) return { ok: false as const, error: "Unlock the app first." };
+  const user = await currentUser();
+  if (!user) return { ok: false as const, error: "Log in first." };
   const amount = toPaise(input.amount);
   if (amount === null) return { ok: false as const, error: "Enter an amount, like 250." };
   if (!isCategory(input.category)) return { ok: false as const, error: "Pick a category." };
   if (!DATE.test(input.date)) return { ok: false as const, error: "Pick a date." };
-  addExpense(await ownerId(), {
+  addExpense(user.id, {
     amount,
     category: input.category,
     note: String(input.note ?? "").trim().slice(0, 80),
@@ -40,20 +42,22 @@ export async function addExpenseAction(input: { amount: string; category: string
 }
 
 export async function deleteExpenseAction(id: string) {
-  if (!(await hasAccess()) || typeof id !== "string") return { ok: false };
-  deleteExpense(await ownerId(), id);
+  const user = await currentUser();
+  if (!user || typeof id !== "string") return { ok: false };
+  deleteExpense(user.id, id);
   return { ok: true };
 }
 
 /** Empty string removes the budget. */
 export async function saveBudgetAction(rupees: string) {
-  if (!(await hasAccess())) return { ok: false as const, error: "Unlock the app first." };
+  const user = await currentUser();
+  if (!user) return { ok: false as const, error: "Log in first." };
   if (String(rupees).trim() === "") {
-    setBudget(await ownerId(), null);
+    setBudget(user.id, null);
     return { ok: true as const };
   }
   const amount = toPaise(rupees);
   if (amount === null) return { ok: false as const, error: "Enter a budget, like 20000." };
-  setBudget(await ownerId(), amount);
+  setBudget(user.id, amount);
   return { ok: true as const };
 }
