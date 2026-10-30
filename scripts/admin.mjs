@@ -60,6 +60,11 @@ function hashPassword(password) {
 const [command, ...args] = process.argv.slice(2);
 console.log(`Database: ${FILE}`);
 
+// The app creates the account tables when it first touches them.
+if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()) {
+  fail("No accounts yet. Create one in the app first.");
+}
+
 switch (command) {
   case "users": {
     const rows = db
