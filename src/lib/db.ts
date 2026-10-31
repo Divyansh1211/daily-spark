@@ -43,6 +43,27 @@ function open() {
       owner TEXT PRIMARY KEY,
       amount INTEGER NOT NULL        -- paise per month
     );
+    CREATE TABLE IF NOT EXISTS calendar_feeds (
+      id TEXT PRIMARY KEY,
+      owner TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      url TEXT NOT NULL,             -- secret iCal link; never sent back to the browser
+      name TEXT NOT NULL,
+      synced_at INTEGER,
+      error TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      owner TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      feed_id TEXT REFERENCES calendar_feeds (id) ON DELETE CASCADE, -- null when added in the app
+      title TEXT NOT NULL,
+      starts_at INTEGER NOT NULL,    -- ms; all-day events are UTC midnight of their date
+      ends_at INTEGER NOT NULL,      -- ms, exclusive
+      all_day INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS events_starts ON events (starts_at);
+    CREATE INDEX IF NOT EXISTS events_feed ON events (feed_id);
   `);
   return db;
 }

@@ -3,8 +3,9 @@
 import { useState, useSyncExternalStore } from "react";
 import type { User } from "@/lib/auth";
 import { AccountMenu } from "./account-menu";
+import { Calendar } from "./calendar";
 import { Expenses } from "./expenses";
-import { BellIcon, ImageIcon, SunIcon, WalletIcon } from "./icons";
+import { BellIcon, CalendarIcon, ImageIcon, SunIcon, WalletIcon } from "./icons";
 import { Photos } from "./photos";
 import { RemindersApp } from "./reminders-app";
 import { ThemeToggle } from "./theme-toggle";
@@ -12,6 +13,7 @@ import { Today } from "./today";
 
 const TABS = [
   { id: "today", label: "Today", Icon: SunIcon },
+  { id: "calendar", label: "Calendar", Icon: CalendarIcon },
   { id: "photos", label: "Photos", Icon: ImageIcon },
   { id: "expenses", label: "Expenses", Icon: WalletIcon },
   { id: "reminders", label: "Reminders", Icon: BellIcon },
@@ -19,6 +21,7 @@ const TABS = [
 
 const HEADINGS = {
   today: { title: "Haanji", subtitle: null },
+  calendar: { title: "Calendar", subtitle: "What we're both up to" },
   photos: { title: "Photos", subtitle: "Our little moments" },
   expenses: { title: "Expenses", subtitle: "Just for you" },
   reminders: { title: "Reminders", subtitle: "Stay on track" },
@@ -62,6 +65,9 @@ export function AppShell({ user }: { user: User }) {
         {/* Both stay mounted so switching tabs keeps state; un-hiding replays the rise animation. */}
         <div hidden={tab !== "today"} className="animate-rise">
           <Today />
+        </div>
+        <div hidden={tab !== "calendar"} className="animate-rise">
+          <Calendar />
         </div>
         <div hidden={tab !== "photos"} className="animate-rise">
           <Photos />

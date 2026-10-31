@@ -16,6 +16,11 @@
   --hero: #d6f3f7;
   --hero-fg: #0b4652;
   --on-accent: #ffffff;
+  /* One colour per person in the shared calendar, in sign-up order. */
+  --person-1: #0e9fb3;
+  --person-2: #e0577f;
+  --person-3: #b97f00;
+  --person-4: #7b61e0;
 }
 
 :root[data-theme="dark"] {
@@ -30,6 +35,10 @@
   --hero: #10303a;
   --hero-fg: #d4f7fb;
   --on-accent: #071417;
+  --person-1: #1ca4b3;
+  --person-2: #e05a82;
+  --person-3: #bf8608;
+  --person-4: #8b70ea;
 }
 
 @theme inline {
