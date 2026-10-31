@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import type { User } from "@/lib/auth";
 import type { CalendarEvent } from "@/lib/calendar";
 import { SignedOut } from "./auth-screen";
 import {
@@ -8,11 +9,13 @@ import {
   addFeedAction,
   deleteEventAction,
   loadCalendar,
+  remindAboutEventAction,
   removeFeedAction,
   syncCalendarsAction,
   type CalendarData,
 } from "./calendar-actions";
-import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, LinkIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
+import { BellIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, LinkIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
+import { WhoPicker } from "./who-picker";
 
 const DAY = 24 * 60 * 60 * 1000;
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -84,6 +87,35 @@ function ago(ms: number) {
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+}
+
+type ReminderOption = { id: string; label: string; at: number; body: string };
+
+const MINUTE = 60 * 1000;
+
+/** When a reminder about an event can go off, leaving out times already past. */
+function reminderOptions(e: Pick<CalendarEvent, "start" | "allDay">): ReminderOption[] {
+  let options: ReminderOption[];
+  if (e.allDay) {
+    // All-day events are stored as UTC dates; remind at 9 AM local time.
+    const day = new Date(e.start).toISOString().slice(0, 10);
+    const morning = fromKey(day).getTime() + 9 * 60 * MINUTE;
+    const dayBefore = fromKey(addDays(day, -1)).getTime() + 9 * 60 * MINUTE;
+    options = [
+      { id: "morning", label: "Morning of (9 AM)", at: morning, body: "Today" },
+      { id: "day-before", label: "Day before (9 AM)", at: dayBefore, body: "Tomorrow" },
+    ];
+  } else {
+    const at = time(e.start);
+    options = [
+      { id: "0", label: "When it starts", at: e.start, body: `Starting now (${at})` },
+      { id: "10", label: "10 min before", at: e.start - 10 * MINUTE, body: `Starts at ${at}` },
+      { id: "30", label: "30 min before", at: e.start - 30 * MINUTE, body: `Starts at ${at}` },
+      { id: "60", label: "1 hour before", at: e.start - 60 * MINUTE, body: `Starts at ${at}` },
+      { id: "1440", label: "1 day before", at: e.start - 24 * 60 * MINUTE, body: `Tomorrow at ${at}` },
+    ];
+  }
+  return options.filter((o) => o.at > Date.now());
 }
 
 const personColor = (index: number) => `var(--person-${(index % 4) + 1})`;
@@ -196,6 +228,7 @@ export function Calendar() {
         today={today}
         events={byDay.get(day) ?? []}
         me={data.me}
+        people={data.people}
         colorOf={colorOf}
         nameOf={nameOf}
         onChange={refresh}
@@ -300,6 +333,7 @@ function DayAgenda({
   today,
   events,
   me,
+  people,
   colorOf,
   nameOf,
   onChange,
@@ -308,12 +342,16 @@ function DayAgenda({
   today: string;
   events: CalendarEvent[];
   me: string;
+  people: User[];
   colorOf: Map<string, string>;
   nameOf: Map<string, string>;
   onChange: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  // The event whose reminder form is open.
+  const [reminding, setReminding] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const label =
     day === today
       ? "Today"
@@ -326,6 +364,7 @@ function DayAgenda({
 
   async function remove(id: string) {
     setRemoving(id);
+    setMessage(null);
     // Let the exit animation play before the row disappears.
     await new Promise((r) => setTimeout(r, 250));
     await deleteEventAction(id);
@@ -347,12 +386,17 @@ function DayAgenda({
       {adding && (
         <AddEvent
           day={day}
-          onDone={(added) => {
+          me={me}
+          people={people}
+          onDone={(added, note) => {
             setAdding(false);
+            setMessage(note ?? null);
             if (added) onChange();
           }}
         />
       )}
+
+      {message && <p className="animate-rise mt-3 text-sm text-muted">{message}</p>}
 
       {sorted.length === 0 && !adding && <p className="mt-3 text-sm text-muted">Nothing planned. A free day!</p>}
 
@@ -361,30 +405,58 @@ function DayAgenda({
           {sorted.map((e) => (
             <li
               key={e.id}
-              className={`animate-rise flex items-center gap-3 rounded-2xl bg-background p-3 pr-2 transition-all duration-300 ${
+              className={`animate-rise rounded-2xl bg-background transition-all duration-300 ${
                 removing === e.id ? "translate-x-8 opacity-0" : ""
               }`}
             >
-              <span className="w-1 self-stretch rounded-full" style={{ background: colorOf.get(e.owner) ?? "var(--muted)" }} />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-muted">{timeLabel(e, day)}</p>
-                <p className="truncate text-sm font-medium">{e.title}</p>
-                <p className="text-xs text-muted">{nameOf.get(e.owner) ?? "Someone"}</p>
+              <div className="flex items-center gap-1 p-3 pr-2">
+                <span
+                  className="mr-2 w-1 self-stretch rounded-full"
+                  style={{ background: colorOf.get(e.owner) ?? "var(--muted)" }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-muted">{timeLabel(e, day)}</p>
+                  <p className="truncate text-sm font-medium">{e.title}</p>
+                  <p className="text-xs text-muted">{nameOf.get(e.owner) ?? "Someone"}</p>
+                </div>
+                {reminderOptions(e).length > 0 && (
+                  <button
+                    onClick={() => (setReminding(reminding === e.id ? null : e.id), setMessage(null))}
+                    aria-label={`Remind about ${e.title}`}
+                    aria-expanded={reminding === e.id}
+                    className={`rounded-xl p-2.5 transition-colors active:scale-90 ${
+                      reminding === e.id ? "bg-accent-soft text-accent" : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    <BellIcon />
+                  </button>
+                )}
+                {e.owner === me && !e.linked ? (
+                  <button
+                    onClick={() => remove(e.id)}
+                    aria-label={`Delete ${e.title}`}
+                    className="rounded-xl p-2.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-500 active:scale-90"
+                  >
+                    <TrashIcon />
+                  </button>
+                ) : (
+                  e.linked && (
+                    <span className="p-2.5 text-muted" title="From a linked calendar">
+                      <LinkIcon aria-label="From a linked calendar" />
+                    </span>
+                  )
+                )}
               </div>
-              {e.owner === me && !e.linked ? (
-                <button
-                  onClick={() => remove(e.id)}
-                  aria-label={`Delete ${e.title}`}
-                  className="rounded-xl p-2.5 text-muted transition-colors hover:bg-red-500/10 hover:text-red-500 active:scale-90"
-                >
-                  <TrashIcon />
-                </button>
-              ) : (
-                e.linked && (
-                  <span className="p-2.5 text-muted" title="From a linked calendar">
-                    <LinkIcon aria-label="From a linked calendar" />
-                  </span>
-                )
+              {reminding === e.id && (
+                <RemindForm
+                  event={e}
+                  me={me}
+                  people={people}
+                  onDone={(note) => {
+                    setReminding(null);
+                    setMessage(note);
+                  }}
+                />
               )}
             </li>
           ))}
@@ -405,27 +477,45 @@ function plusHour(hhmm: string) {
   return `${pad((h + 1) % 24)}:${pad(m)}`;
 }
 
-function AddEvent({ day, onDone }: { day: string; onDone: (added: boolean) => void }) {
+function AddEvent({
+  day,
+  me,
+  people,
+  onDone,
+}: {
+  day: string;
+  me: string;
+  people: User[];
+  onDone: (added: boolean, note?: string) => void;
+}) {
   const [title, setTitle] = useState("");
   const [date, setDate] = useState(day);
   const [allDay, setAllDay] = useState(false);
   const [start, setStart] = useState(nextHour);
   const [end, setEnd] = useState(() => plusHour(nextHour()));
+  const [remind, setRemind] = useState<Reminding>({ option: "none", to: [me] });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const startMs = new Date(`${date}T${start}`).getTime();
+  let endMs = new Date(`${date}T${end}`).getTime();
+  // 10 pm to 1 am ends the next day.
+  if (endMs <= startMs) endMs = new Date(`${addDays(date, 1)}T${end}`).getTime();
+  const options = Number.isFinite(startMs)
+    ? reminderOptions(allDay ? { start: Date.parse(`${date}T00:00:00Z`), allDay } : { start: startMs, allDay })
+    : [];
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
     try {
-      const startMs = new Date(`${date}T${start}`).getTime();
-      let endMs = new Date(`${date}T${end}`).getTime();
-      // 10 pm to 1 am ends the next day.
-      if (endMs <= startMs) endMs = new Date(`${addDays(date, 1)}T${end}`).getTime();
       const result = await addEventAction({ title, allDay, date, start: startMs, end: endMs });
       if (!result.ok) return setError(result.error);
-      onDone(true);
+      const picked = options.find((o) => o.id === remind.option);
+      if (!picked) return onDone(true);
+      const reminder = await remindAboutEventAction({ eventId: result.id, at: picked.at, body: picked.body, to: remind.to });
+      onDone(true, reminder.ok ? (reminder.warning ?? "Added, with a reminder.") : `Added, but no reminder: ${reminder.error}`);
     } finally {
       setSaving(false);
     }
@@ -485,6 +575,7 @@ function AddEvent({ day, onDone }: { day: string; onDone: (added: boolean) => vo
           </label>
         </div>
       )}
+      <ReminderFields options={options} me={me} people={people} value={remind} onChange={setRemind} optional />
       {error && <p className="animate-rise text-sm text-red-500">{error}</p>}
       <div className="flex gap-2">
         <button type="submit" disabled={saving} className={`${primaryButton} flex-1`}>
@@ -494,6 +585,100 @@ function AddEvent({ day, onDone }: { day: string; onDone: (added: boolean) => vo
           Cancel
         </button>
       </div>
+    </form>
+  );
+}
+
+type Reminding = { option: string; to: string[] };
+
+/** When to remind and who; `optional` adds a "No reminder" choice. */
+function ReminderFields({
+  options,
+  me,
+  people,
+  value,
+  onChange,
+  optional = false,
+}: {
+  options: ReminderOption[];
+  me: string;
+  people: User[];
+  value: Reminding;
+  onChange: (value: Reminding) => void;
+  optional?: boolean;
+}) {
+  if (options.length === 0) return null;
+  const picked = options.some((o) => o.id === value.option) ? value.option : optional ? "none" : options[0].id;
+  return (
+    <div className="space-y-3">
+      <div>
+        <span className={fieldLabel}>Reminder</span>
+        <div className="flex flex-wrap gap-2">
+          {[...(optional ? [{ id: "none", label: "None" }] : []), ...options].map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onChange({ ...value, option: o.id })}
+              aria-pressed={picked === o.id}
+              className={`rounded-full px-3.5 py-2 text-sm font-medium transition-all active:scale-95 ${
+                picked === o.id ? "bg-accent-soft text-accent ring-2 ring-accent" : "bg-background text-muted ring-1 ring-line"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {picked !== "none" && (
+        <WhoPicker people={people} me={me} value={value.to} onChange={(to) => onChange({ ...value, to })} />
+      )}
+    </div>
+  );
+}
+
+/** Sets a reminder about an event that's already on the calendar. */
+function RemindForm({
+  event,
+  me,
+  people,
+  onDone,
+}: {
+  event: CalendarEvent;
+  me: string;
+  people: User[];
+  onDone: (note: string) => void;
+}) {
+  const options = reminderOptions(event);
+  // The other person's events default to reminding them too, since that's usually the point.
+  const [value, setValue] = useState<Reminding>({
+    option: options.find((o) => o.id === "30")?.id ?? options[0]?.id ?? "",
+    to: event.owner === me ? [me] : [me, event.owner],
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const picked = options.find((o) => o.id === value.option) ?? options[0];
+    if (!picked) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await remindAboutEventAction({ eventId: event.id, at: picked.at, body: picked.body, to: value.to });
+      if (!result.ok) return setError(result.error);
+      onDone(result.warning ?? `Reminder set for ${event.title}.`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="animate-rise space-y-3 border-t border-line p-3">
+      <ReminderFields options={options} me={me} people={people} value={value} onChange={setValue} />
+      {error && <p className="animate-rise text-sm text-red-500">{error}</p>}
+      <button type="submit" disabled={saving} className={`${primaryButton} w-full`}>
+        {saving ? "Setting…" : "Set reminder"}
+      </button>
     </form>
   );
 }

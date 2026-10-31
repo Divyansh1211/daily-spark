@@ -30,11 +30,6 @@ const MAX_FEED_BYTES = 10 * 1024 * 1024;
 // Times without a usable time zone (rare: floating times, Windows zone names) are read as Indian time.
 const FALLBACK_ZONE = "Asia/Kolkata";
 
-export function listPeople() {
-  const rows = db().prepare("SELECT id, name FROM users ORDER BY created_at").all() as { id: string; name: string }[];
-  return rows.map((r) => ({ id: r.id, name: r.name }));
-}
-
 /** Everyone's events overlapping [from, to). All-day events are matched a day wider, since their stored UTC day can sit either side of local midnight. */
 export function listEvents(from: number, to: number): CalendarEvent[] {
   const rows = db()
@@ -65,14 +60,23 @@ export function listEvents(from: number, to: number): CalendarEvent[] {
 }
 
 export function addEvent(owner: string, e: { title: string; start: number; end: number; allDay: boolean }) {
+  const id = randomUUID();
   db().prepare(
     "INSERT INTO events (id, owner, title, starts_at, ends_at, all_day, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  ).run(randomUUID(), owner, e.title, e.start, e.end, e.allDay ? 1 : 0, Date.now());
+  ).run(id, owner, e.title, e.start, e.end, e.allDay ? 1 : 0, Date.now());
+  return id;
 }
 
-/** Only events added in the app; linked ones come back on the next sync anyway. */
+export function getEvent(id: string) {
+  const row = db().prepare("SELECT title, ends_at, feed_id FROM events WHERE id = ?").get(id) as
+    | { title: string; ends_at: number; feed_id: string | null }
+    | undefined;
+  return row ? { title: row.title, end: row.ends_at, linked: row.feed_id !== null } : null;
+}
+
+/** Only events added in the app; linked ones come back on the next sync anyway. Returns whether it was deleted. */
 export function deleteEvent(owner: string, id: string) {
-  db().prepare("DELETE FROM events WHERE id = ? AND owner = ? AND feed_id IS NULL").run(id, owner);
+  return db().prepare("DELETE FROM events WHERE id = ? AND owner = ? AND feed_id IS NULL").run(id, owner).changes > 0;
 }
 
 export function listFeeds(owner: string): Feed[] {

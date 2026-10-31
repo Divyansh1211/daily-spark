@@ -1,20 +1,22 @@
 "use server";
 
-import { currentUser } from "@/lib/auth";
+import { currentUser, listPeople } from "@/lib/auth";
 import {
   addEvent,
   addFeed,
   anyFeedStale,
   deleteEvent,
+  getEvent,
   listEvents,
   listFeeds,
-  listPeople,
   normaliseFeedUrl,
   removeFeed,
   syncStaleFeeds,
   type CalendarEvent,
   type Feed,
 } from "@/lib/calendar";
+import { createReminders } from "@/lib/reminders";
+import { store } from "@/lib/store";
 
 const DAY = 24 * 60 * 60 * 1000;
 const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -69,21 +71,40 @@ export async function addEventAction(input: { title: string; allDay: boolean; da
     if (!DATE.test(input.date)) return { ok: false as const, error: "Pick a date." };
     const [y, m, d] = input.date.split("-").map(Number);
     const start = Date.UTC(y, m - 1, d);
-    addEvent(user.id, { title, start, end: start + DAY, allDay: true });
-  } else {
-    const { start, end } = input;
-    if (!isTime(start) || !isTime(end)) return { ok: false as const, error: "Pick a time." };
-    if (end <= start || end - start > 7 * DAY) return { ok: false as const, error: "Check the start and end times." };
-    addEvent(user.id, { title, start, end, allDay: false });
+    return { ok: true as const, id: addEvent(user.id, { title, start, end: start + DAY, allDay: true }) };
   }
-  return { ok: true as const };
+  const { start, end } = input;
+  if (!isTime(start) || !isTime(end)) return { ok: false as const, error: "Pick a time." };
+  if (end <= start || end - start > 7 * DAY) return { ok: false as const, error: "Check the start and end times." };
+  return { ok: true as const, id: addEvent(user.id, { title, start, end, allDay: false }) };
 }
 
 export async function deleteEventAction(id: string) {
   const user = await currentUser();
   if (!user || typeof id !== "string") return { ok: false };
-  deleteEvent(user.id, id);
+  if (deleteEvent(user.id, id)) await store.deleteEventReminders(id);
   return { ok: true };
+}
+
+/**
+ * A reminder about an event, for you, the other person or both. The phone works out `at` and
+ * the text ("Starts at 6:00 PM") since it knows the local time.
+ */
+export async function remindAboutEventAction(input: { eventId: string; at: number; body: string; to: string[] }) {
+  const user = await currentUser();
+  if (!user) return { ok: false as const, error: "Log in first." };
+  const event = typeof input.eventId === "string" ? getEvent(input.eventId) : null;
+  if (!event) return { ok: false as const, error: "That event is gone." };
+  if (isTime(input.at) && input.at > event.end) return { ok: false as const, error: "That's after the event ends." };
+  return createReminders(user, {
+    title: event.title,
+    body: input.body,
+    at: input.at,
+    repeat: "none",
+    to: input.to,
+    // Linked events are copied afresh on every sync, so their ids don't last.
+    eventId: event.linked ? undefined : input.eventId,
+  });
 }
 
 export async function addFeedAction(link: string) {

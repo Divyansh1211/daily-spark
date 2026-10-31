@@ -8,8 +8,14 @@ export type Repeat = "none" | "daily";
 
 export type Reminder = {
   id: string;
-  /** Owner; the reminder goes to every device they have notifications on. */
+  /** Who it's for; it goes to every device they have notifications on. */
   userId?: string;
+  /** Who set it, when that's someone else. They see it in their list too and can delete it. */
+  createdBy?: string;
+  /** Their name, added to the notification ("from Divyansh"). */
+  fromName?: string;
+  /** The calendar event it's about; deleting the event deletes it. */
+  eventId?: string;
   /** Only on reminders made before accounts, until someone logs in on that device. */
   deviceId?: string;
   title: string;
@@ -35,9 +41,11 @@ export interface Store {
   /** Removes the subscription, its daily quote and any reminders made on it before accounts. */
   deleteDevice(deviceId: string): Promise<void>;
   saveReminder(reminder: Reminder): Promise<void>;
+  /** Reminders for this person and ones they set for someone else. */
   listReminders(userId: string): Promise<Reminder[]>;
-  /** With userId, only deletes the reminder if it belongs to them. */
+  /** With userId, only deletes the reminder if it's for them or they set it. */
   deleteReminder(id: string, userId?: string): Promise<void>;
+  deleteEventReminders(eventId: string): Promise<void>;
   /** Gives reminders made on this device before accounts to the person now using it. */
   claimReminders(deviceId: string, userId: string): Promise<void>;
   dueReminders(now: number): Promise<Reminder[]>;
@@ -52,7 +60,8 @@ export interface Store {
 //   deviceuser             -> hash of deviceId -> userId
 //   user:{userId}:devices  -> set of deviceIds
 //   reminder:{id}          -> reminder JSON
-//   user:{userId}:rems     -> set of reminder ids
+//   user:{userId}:rems     -> set of reminder ids for them or set by them
+//   event:{eventId}:rems   -> set of reminder ids about a calendar event
 //   device:{deviceId}:rems -> set of reminder ids made before accounts
 //   due                    -> sorted set of reminder ids, scored by `at`
 //   dailyquote             -> hash of deviceId -> daily quote setting JSON
@@ -96,6 +105,8 @@ class RedisStore implements Store {
     const tx = this.redis.multi();
     tx.set(`reminder:${reminder.id}`, reminder);
     tx.sadd(reminder.userId ? `user:${reminder.userId}:rems` : `device:${reminder.deviceId}:rems`, reminder.id);
+    if (reminder.createdBy) tx.sadd(`user:${reminder.createdBy}:rems`, reminder.id);
+    if (reminder.eventId) tx.sadd(`event:${reminder.eventId}:rems`, reminder.id);
     tx.zadd("due", { score: reminder.at, member: reminder.id });
     await tx.exec();
   }
@@ -115,12 +126,18 @@ class RedisStore implements Store {
 
   async deleteReminder(id: string, userId?: string) {
     const reminder = await this.redis.get<Reminder>(`reminder:${id}`);
-    if (!reminder || (userId && reminder.userId !== userId)) return;
+    if (!reminder || (userId && reminder.userId !== userId && reminder.createdBy !== userId)) return;
     const tx = this.redis.multi();
     tx.del(`reminder:${id}`);
     tx.srem(reminder.userId ? `user:${reminder.userId}:rems` : `device:${reminder.deviceId}:rems`, id);
+    if (reminder.createdBy) tx.srem(`user:${reminder.createdBy}:rems`, id);
+    if (reminder.eventId) tx.srem(`event:${reminder.eventId}:rems`, id);
     tx.zrem("due", id);
     await tx.exec();
+  }
+
+  async deleteEventReminders(eventId: string) {
+    for (const id of await this.redis.smembers(`event:${eventId}:rems`)) await this.deleteReminder(id);
   }
 
   async claimReminders(deviceId: string, userId: string) {
@@ -201,15 +218,23 @@ class MemoryStore implements Store {
 
   async listReminders(userId: string) {
     return [...this.reminders.values()]
-      .filter((r) => r.userId === userId)
+      .filter((r) => r.userId === userId || r.createdBy === userId)
       .sort((a, b) => a.at - b.at);
   }
 
   async deleteReminder(id: string, userId?: string) {
     const reminder = this.reminders.get(id);
-    if (!reminder || (userId && reminder.userId !== userId)) return;
+    if (!reminder || (userId && reminder.userId !== userId && reminder.createdBy !== userId)) return;
     this.reminders.delete(id);
     this.changed();
+  }
+
+  async deleteEventReminders(eventId: string) {
+    let deleted = false;
+    for (const [id, r] of this.reminders) {
+      if (r.eventId === eventId) deleted = this.reminders.delete(id);
+    }
+    if (deleted) this.changed();
   }
 
   async claimReminders(deviceId: string, userId: string) {

@@ -12,7 +12,9 @@ import {
   unsubscribeUser,
   type ReminderView,
 } from "./actions";
+import type { User } from "@/lib/auth";
 import { BellIcon, CheckIcon, RepeatIcon, SendIcon, ShareIcon, SunIcon, TrashIcon } from "./icons";
+import { WhoPicker } from "./who-picker";
 
 type Support = "checking" | "supported" | "needs-install" | "unsupported";
 
@@ -206,6 +208,10 @@ function DailyQuoteToggle({ endpoint }: { endpoint: string }) {
 
 function Reminders({ endpoint }: { endpoint: string }) {
   const [reminders, setReminders] = useState<ReminderView[]>([]);
+  const [me, setMe] = useState("");
+  const [people, setPeople] = useState<User[]>([]);
+  // Null means "just me" until changed.
+  const [to, setTo] = useState<string[] | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   // Pre-filled because phones show an empty date-time field as a blank box.
@@ -217,7 +223,15 @@ function Reminders({ endpoint }: { endpoint: string }) {
   const [justSaved, setJustSaved] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const refresh = useCallback(() => listReminders().then(setReminders), []);
+  const refresh = useCallback(
+    () =>
+      listReminders().then((r) => {
+        setReminders(r.reminders);
+        setMe(r.me);
+        setPeople(r.people);
+      }),
+    [],
+  );
 
   useEffect(() => {
     refresh();
@@ -234,15 +248,17 @@ function Reminders({ endpoint }: { endpoint: string }) {
     const at = new Date(when).getTime();
     setSaving(true);
     try {
-      const result = await scheduleReminder({ title, body, at, repeat });
+      const result = await scheduleReminder({ title, body, at, repeat, to: to ?? [me] });
       if (!result.ok) {
         setError(result.error);
         return;
       }
+      if (result.warning) setNotice(result.warning);
       setTitle("");
       setBody("");
       setWhen(nextHour());
       setRepeat("none");
+      setTo(null);
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 1600);
       await refresh();
@@ -279,7 +295,7 @@ function Reminders({ endpoint }: { endpoint: string }) {
           <input
             required
             maxLength={80}
-            placeholder="What should we remind you about?"
+            placeholder="What's the reminder?"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className={input}
@@ -322,6 +338,8 @@ function Reminders({ endpoint }: { endpoint: string }) {
               </button>
             ))}
           </div>
+
+          <WhoPicker people={people} me={me} value={to ?? [me]} onChange={setTo} />
 
           {error && <p className="animate-rise text-sm text-red-500">{error}</p>}
 
@@ -376,6 +394,11 @@ function Reminders({ endpoint }: { endpoint: string }) {
                       </span>
                     </div>
                     <div className="min-w-0 flex-1">
+                      {(r.forName || r.fromName) && (
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-accent">
+                          {r.forName ? `For ${r.forName}` : `From ${r.fromName}`}
+                        </p>
+                      )}
                       <p className="truncate font-medium">{r.title}</p>
                       {r.body ? (
                         <p className="truncate text-sm text-muted">{r.body}</p>

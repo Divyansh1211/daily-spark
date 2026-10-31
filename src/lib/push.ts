@@ -67,7 +67,9 @@ export async function sendDueReminders(now = Date.now()) {
     let delivered = false;
     for (const deviceId of devices) {
       try {
-        if (await sendPush(deviceId, { title: reminder.title, body: reminder.body, tag: reminder.id })) {
+        const from = reminder.fromName ? `from ${reminder.fromName}` : "";
+        const body = [reminder.body, from].filter(Boolean).join(" · ");
+        if (await sendPush(deviceId, { title: reminder.title, body, tag: reminder.id })) {
           delivered = true;
         }
       } catch (error) {

@@ -83,6 +83,12 @@ function cleanName(name: string) {
   return String(name ?? "").trim().replace(/\s+/g, " ");
 }
 
+/** Everyone with an account, in sign-up order. */
+export function listPeople(): User[] {
+  const rows = db().prepare("SELECT id, name FROM users ORDER BY created_at").all() as User[];
+  return rows.map((r) => ({ id: r.id, name: r.name }));
+}
+
 /** The logged-in person, or null. */
 export async function currentUser(): Promise<User | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
