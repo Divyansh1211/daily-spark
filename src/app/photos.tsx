@@ -24,6 +24,7 @@ import {
   usePhotos,
   type Photo,
 } from "./use-photos";
+import { useCloseOnBack } from "./use-close-on-back";
 
 export function Photos() {
   const state = usePhotos();
@@ -169,6 +170,7 @@ function Viewer({
   onIndex: (i: number) => void;
   onClose: () => void;
 }) {
+  useCloseOnBack(onClose);
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);

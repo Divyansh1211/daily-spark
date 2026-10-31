@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CheckIcon, RepeatIcon, XIcon } from "./icons";
+import { useCloseOnBack } from "./use-close-on-back";
 
 type Facing = "environment" | "user";
 
@@ -30,6 +31,7 @@ export function Camera({
   /** Called when the camera can't start, to use the phone's camera app instead. */
   onFallback: () => void;
 }) {
+  useCloseOnBack(onClose);
   const video = useRef<HTMLVideoElement>(null);
   const track = useRef<MediaStreamTrack | null>(null);
   const [shot, setShot] = useState<{ blob: Blob; url: string } | null>(null);
