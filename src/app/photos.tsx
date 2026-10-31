@@ -147,40 +147,9 @@ function Viewer({
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [dragX, setDragX] = useState(0);
-  const drag = useRef<{ x: number; y: number; horizontal: boolean | null } | null>(null);
   const photo = photos[index];
   const hasPrev = index > 0;
   const hasNext = index < photos.length - 1;
-
-  // Swipe left/right to change photo. The photo follows the finger, and resists at either end.
-  function onPointerDown(e: React.PointerEvent) {
-    drag.current = { x: e.clientX, y: e.clientY, horizontal: null };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    const d = drag.current;
-    if (!d) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    // Decide the direction once the finger has moved a little.
-    if (d.horizontal === null && Math.hypot(dx, dy) > 8) d.horizontal = Math.abs(dx) > Math.abs(dy);
-    if (!d.horizontal) return;
-    const atEnd = (dx > 0 && !hasPrev) || (dx < 0 && !hasNext);
-    setDragX(atEnd ? dx / 4 : dx);
-  }
-
-  function onPointerUp() {
-    const d = drag.current;
-    drag.current = null;
-    if (d?.horizontal) {
-      const threshold = Math.min(80, window.innerWidth * 0.18);
-      if (dragX < -threshold && hasNext) onIndex(index + 1);
-      else if (dragX > threshold && hasPrev) onIndex(index - 1);
-    }
-    setDragX(0);
-  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -229,34 +198,14 @@ function Viewer({
         </button>
       </div>
 
-      <div
+      <PhotoStage
         key={photo.id}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        // touch-none: the swipe is ours, not the browser's back/forward or scroll gesture.
-        className={`animate-fade relative min-h-0 flex-1 touch-none select-none ${
-          dragX === 0 ? "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]" : ""
-        }`}
-        style={{ transform: dragX ? `translateX(${dragX}px)` : undefined }}
-      >
-        {/* The thumbnail is usually cached, so it shows instantly while the full photo loads on top. */}
-        {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
-        <img
-          src={photoUrl(photo.id, "thumb")}
-          alt=""
-          draggable={false}
-          className="absolute inset-0 size-full object-contain"
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
-        <img
-          src={photoUrl(photo.id, "full")}
-          alt=""
-          draggable={false}
-          className="absolute inset-0 size-full object-contain"
-        />
-      </div>
+        photo={photo}
+        hasPrev={hasPrev}
+        hasNext={hasNext}
+        onPrev={() => onIndex(index - 1)}
+        onNext={() => onIndex(index + 1)}
+      />
 
       <div className="flex items-center justify-between px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <button
@@ -281,6 +230,238 @@ function Viewer({
       </div>
     </div>,
     document.body,
+  );
+}
+
+type Point = { x: number; y: number };
+type View = { scale: number; x: number; y: number };
+type Gesture =
+  | { kind: "swipe"; start: Point; horizontal: boolean | null }
+  | { kind: "pan"; start: Point; from: View }
+  | { kind: "pinch"; distance: number; scale: number; anchor: Point };
+
+const unzoomed: View = { scale: 1, x: 0, y: 0 };
+const MAX_ZOOM = 5;
+const DOUBLE_TAP_ZOOM = 2.5;
+
+// One photo in the viewer. Swipe to change photo, pinch or double-tap to zoom, drag to look
+// around while zoomed. Keyed by photo, so the zoom resets when the photo changes.
+function PhotoStage({
+  photo,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+}: {
+  photo: Photo;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const stage = useRef<HTMLDivElement>(null);
+  const image = useRef<HTMLImageElement>(null);
+  const [view, setViewState] = useState(unzoomed);
+  const current = useRef(unzoomed);
+  const [dragX, setDragX] = useState(0);
+  // While a finger is down the photo follows it exactly; afterwards it eases into place.
+  const [touching, setTouching] = useState(false);
+  const pointers = useRef(new Map<number, Point>());
+  const gesture = useRef<Gesture | null>(null);
+  const tap = useRef<{ at: number; point: Point; moved: boolean } | null>(null);
+  const lastTap = useRef<{ at: number; point: Point } | null>(null);
+
+  function setView(next: View) {
+    current.current = next;
+    setViewState(next);
+  }
+
+  // Pointer position relative to the middle of the stage, which is where the zoom is anchored.
+  function local(e: { clientX: number; clientY: number }): Point {
+    const rect = stage.current!.getBoundingClientRect();
+    return { x: e.clientX - rect.left - rect.width / 2, y: e.clientY - rect.top - rect.height / 2 };
+  }
+
+  // Keep the photo covering the screen: no panning past its edges, never smaller than fitted.
+  function settle(v: View): View {
+    const scale = Math.min(MAX_ZOOM, Math.max(1, v.scale));
+    if (scale < 1.05) return unzoomed;
+    const rect = stage.current!.getBoundingClientRect();
+    const img = image.current;
+    const fit =
+      img && img.naturalWidth
+        ? Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight)
+        : 0;
+    const width = fit ? img!.naturalWidth * fit : rect.width;
+    const height = fit ? img!.naturalHeight * fit : rect.height;
+    const maxX = Math.max(0, (width * scale - rect.width) / 2);
+    const maxY = Math.max(0, (height * scale - rect.height) / 2);
+    return {
+      scale,
+      x: Math.min(maxX, Math.max(-maxX, v.x)),
+      y: Math.min(maxY, Math.max(-maxY, v.y)),
+    };
+  }
+
+  // Zoom to `scale`, keeping the spot under `at` where it is.
+  function zoomAt(at: Point, scale: number, from = current.current): View {
+    const anchor = { x: (at.x - from.x) / from.scale, y: (at.y - from.y) / from.scale };
+    return { scale, x: at.x - anchor.x * scale, y: at.y - anchor.y * scale };
+  }
+
+  function startPinch() {
+    const [a, b] = [...pointers.current.values()];
+    const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const v = current.current;
+    gesture.current = {
+      kind: "pinch",
+      distance: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      scale: v.scale,
+      anchor: { x: (middle.x - v.x) / v.scale, y: (middle.y - v.y) / v.scale },
+    };
+    setDragX(0);
+  }
+
+  function onPointerDown(e: React.PointerEvent) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const point = local(e);
+    pointers.current.set(e.pointerId, point);
+    setTouching(true);
+    if (pointers.current.size === 2) {
+      tap.current = null;
+      startPinch();
+    } else if (pointers.current.size === 1) {
+      tap.current = { at: Date.now(), point, moved: false };
+      gesture.current =
+        current.current.scale > 1
+          ? { kind: "pan", start: point, from: current.current }
+          : { kind: "swipe", start: point, horizontal: null };
+    }
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!pointers.current.has(e.pointerId)) return;
+    const point = local(e);
+    pointers.current.set(e.pointerId, point);
+    const g = gesture.current;
+    if (tap.current && Math.hypot(point.x - tap.current.point.x, point.y - tap.current.point.y) > 8) {
+      tap.current.moved = true;
+    }
+
+    if (g?.kind === "pinch" && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      // A little give past the limits, so it feels elastic rather than stuck.
+      const raw = (g.scale * Math.hypot(a.x - b.x, a.y - b.y)) / g.distance;
+      const scale = raw < 1 ? 1 - (1 - raw) / 3 : raw > MAX_ZOOM ? MAX_ZOOM + (raw - MAX_ZOOM) / 3 : raw;
+      setView({ scale, x: middle.x - g.anchor.x * scale, y: middle.y - g.anchor.y * scale });
+    } else if (g?.kind === "pan") {
+      setView(settle({ ...g.from, x: g.from.x + point.x - g.start.x, y: g.from.y + point.y - g.start.y }));
+    } else if (g?.kind === "swipe") {
+      const dx = point.x - g.start.x;
+      const dy = point.y - g.start.y;
+      // Decide the direction once the finger has moved a little.
+      if (g.horizontal === null && Math.hypot(dx, dy) > 8) g.horizontal = Math.abs(dx) > Math.abs(dy);
+      if (!g.horizontal) return;
+      const atEnd = (dx > 0 && !hasPrev) || (dx < 0 && !hasNext);
+      setDragX(atEnd ? dx / 4 : dx);
+    }
+  }
+
+  function onPointerUp(e: React.PointerEvent) {
+    if (!pointers.current.delete(e.pointerId)) return;
+    const g = gesture.current;
+
+    if (g?.kind === "swipe" && g.horizontal) {
+      const threshold = Math.min(80, window.innerWidth * 0.18);
+      if (dragX < -threshold && hasNext) onNext();
+      else if (dragX > threshold && hasPrev) onPrev();
+    }
+
+    if (pointers.current.size === 1) {
+      // One finger lifted from a pinch: carry on panning with the other.
+      const [point] = pointers.current.values();
+      const settled = settle(current.current);
+      gesture.current = { kind: "pan", start: point, from: settled };
+      setView(settled);
+      return;
+    }
+    if (pointers.current.size > 0) return;
+
+    gesture.current = null;
+    setTouching(false);
+    setDragX(0);
+    setView(settle(current.current));
+
+    // Double-tap zooms in on that spot, or back out.
+    const t = tap.current;
+    tap.current = null;
+    if (e.type !== "pointerup" || !t || t.moved || Date.now() - t.at > 300) return;
+    const last = lastTap.current;
+    if (last && Date.now() - last.at < 350 && Math.hypot(t.point.x - last.point.x, t.point.y - last.point.y) < 40) {
+      lastTap.current = null;
+      setView(current.current.scale > 1 ? unzoomed : settle(zoomAt(t.point, DOUBLE_TAP_ZOOM, unzoomed)));
+    } else {
+      lastTap.current = { at: Date.now(), point: t.point };
+    }
+  }
+
+  // Trackpad pinch and the mouse wheel zoom too. Added by hand: React's wheel listener is passive.
+  useEffect(() => {
+    const el = stage.current!;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const scale = current.current.scale * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
+      setView(settle(zoomAt(local(e), Math.min(MAX_ZOOM, Math.max(1, scale)))));
+    };
+    // Safari's own pinch would zoom the whole page instead of the photo.
+    const stop = (e: Event) => e.preventDefault();
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("gesturestart", stop);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("gesturestart", stop);
+    };
+  }, []);
+
+  const zoomed = view.scale !== 1 || view.x !== 0 || view.y !== 0;
+  const ease = "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]";
+
+  return (
+    <div
+      ref={stage}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      // touch-none: the gestures are ours, not the browser's back/forward, scroll or page zoom.
+      className={`animate-fade relative min-h-0 flex-1 touch-none overflow-hidden select-none ${
+        dragX === 0 ? ease : ""
+      }`}
+      style={{ transform: dragX ? `translateX(${dragX}px)` : undefined }}
+    >
+      <div
+        className={`absolute inset-0 ${touching ? "" : ease}`}
+        style={{ transform: zoomed ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})` : undefined }}
+      >
+        {/* The thumbnail is usually cached, so it shows instantly while the full photo loads on top. */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
+        <img
+          src={photoUrl(photo.id, "thumb")}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 size-full object-contain"
+        />
+        {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
+        <img
+          ref={image}
+          src={photoUrl(photo.id, "full")}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 size-full object-contain"
+        />
+      </div>
+    </div>
   );
 }
 
