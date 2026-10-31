@@ -52,6 +52,14 @@ export const ShareIcon = (p: SVGProps<SVGSVGElement>) => (
   </Icon>
 );
 
+export const DownloadIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <path d="M12 15V3" />
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="m7 10 5 5 5-5" />
+  </Icon>
+);
+
 export const CheckIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>
     <path d="M20 6 9 17l-5-5" />

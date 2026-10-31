@@ -4,8 +4,26 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { SignedOut } from "./auth-screen";
 import { Camera, canUseInAppCamera } from "./camera";
-import { CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
-import { notifyPhotosChanged, photoUrl, uploadPhoto, usePhotos, type Photo } from "./use-photos";
+import { REACTIONS } from "@/lib/reactions";
+import {
+  CameraIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  ImageIcon,
+  PlusIcon,
+  TrashIcon,
+  XIcon,
+} from "./icons";
+import {
+  downloadPhoto,
+  notifyPhotosChanged,
+  photoUrl,
+  reactToPhoto,
+  uploadPhoto,
+  usePhotos,
+  type Photo,
+} from "./use-photos";
 
 export function Photos() {
   const state = usePhotos();
@@ -107,10 +125,15 @@ function Gallery({ photos }: { photos: Photo[] }) {
             <li key={photo.id} style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }} className="animate-rise">
               <button
                 onClick={() => setOpen(i)}
-                className="block aspect-square w-full overflow-hidden rounded-2xl bg-line transition-transform active:scale-95"
+                className="relative block aspect-square w-full overflow-hidden rounded-2xl bg-line transition-transform active:scale-95"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
                 <img src={photoUrl(photo.id, "thumb")} alt="" loading="lazy" className="size-full object-cover" />
+                {!!photo.reactions?.length && (
+                  <span className="absolute right-1.5 bottom-1.5 rounded-full bg-black/45 px-1.5 py-0.5 text-xs backdrop-blur-sm">
+                    {photo.reactions.map((r) => r.emoji).join("")}
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -147,6 +170,10 @@ function Viewer({
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // Reactions tapped here show straight away, before the photo list has been fetched again.
+  const [mine, setMine] = useState(new Map<string, string | null>());
   const photo = photos[index];
   const hasPrev = index > 0;
   const hasNext = index < photos.length - 1;
@@ -170,6 +197,37 @@ function Viewer({
     };
   }, []);
 
+  const reactions = (photo.reactions ?? []).filter((r) => !r.mine);
+  const myReaction = mine.has(photo.id) ? mine.get(photo.id)! : (photo.reactions?.find((r) => r.mine)?.emoji ?? null);
+  if (myReaction) reactions.push({ emoji: myReaction, name: "You", mine: true });
+
+  async function react(emoji: string) {
+    const id = photo.id;
+    const before = myReaction;
+    const next = emoji === before ? null : emoji;
+    setProblem(null);
+    setMine((m) => new Map(m).set(id, next));
+    try {
+      await reactToPhoto(id, next);
+      notifyPhotosChanged();
+    } catch {
+      setMine((m) => new Map(m).set(id, before));
+      setProblem("Couldn't save your reaction.");
+    }
+  }
+
+  async function save() {
+    setSaving(true);
+    setProblem(null);
+    try {
+      await downloadPhoto(photo);
+    } catch {
+      setProblem("Couldn't save the photo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function remove() {
     if (!confirming) return setConfirming(true);
     await fetch(`/api/photos/${photo.id}`, { method: "DELETE" });
@@ -185,17 +243,30 @@ function Viewer({
         <button onClick={onClose} aria-label="Close" className={viewerButton}>
           <XIcon />
         </button>
-        <span className="text-xs text-white/60">
-          {new Date(photo.at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-        </span>
-        <button
-          onClick={remove}
-          onBlur={() => setConfirming(false)}
-          className={`${viewerButton} ${confirming ? "bg-red-500 px-4 text-sm font-medium" : ""}`}
-          aria-label="Delete photo"
-        >
-          {confirming ? "Delete?" : <TrashIcon />}
-        </button>
+        <div className="text-center text-xs leading-tight text-white/60">
+          <p>{new Date(photo.at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</p>
+          <p>
+            {index + 1} / {photos.length}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={save}
+            disabled={saving}
+            aria-label="Save photo"
+            className={`${viewerButton} ${confirming ? "hidden" : ""} disabled:animate-pulse`}
+          >
+            <DownloadIcon />
+          </button>
+          <button
+            onClick={remove}
+            onBlur={() => setConfirming(false)}
+            className={`${viewerButton} ${confirming ? "bg-red-500 px-4 text-sm font-medium" : ""}`}
+            aria-label="Delete photo"
+          >
+            {confirming ? "Delete?" : <TrashIcon />}
+          </button>
+        </div>
       </div>
 
       <PhotoStage
@@ -207,7 +278,16 @@ function Viewer({
         onNext={() => onIndex(index + 1)}
       />
 
-      <div className="flex items-center justify-between px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <p className="min-h-5 px-4 pt-2 text-center text-sm text-white/80" aria-live="polite">
+        {problem ??
+          reactions.map((r, i) => (
+            <span key={r.name}>
+              {i > 0 && <span className="text-white/40"> · </span>}
+              {r.emoji} {r.name}
+            </span>
+          ))}
+      </p>
+      <div className="flex items-center justify-between gap-1 px-4 pt-2 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <button
           onClick={() => onIndex(index - 1)}
           disabled={!hasPrev}
@@ -216,9 +296,20 @@ function Viewer({
         >
           <ChevronLeftIcon />
         </button>
-        <span className="text-xs text-white/60">
-          {index + 1} / {photos.length}
-        </span>
+        <div className="flex gap-1 rounded-full bg-white/10 p-1" role="group" aria-label="React">
+          {REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              onClick={() => react(emoji)}
+              aria-pressed={myReaction === emoji}
+              className={`flex size-9 items-center justify-center rounded-full text-xl transition-transform active:scale-125 ${
+                myReaction === emoji ? "scale-110 bg-white/25" : ""
+              }`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => onIndex(index + 1)}
           disabled={!hasNext}

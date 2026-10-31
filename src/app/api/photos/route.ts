@@ -5,8 +5,9 @@ const MAX_FULL_BYTES = 8 * 1024 * 1024;
 const MAX_THUMB_BYTES = 1024 * 1024;
 
 export async function GET() {
-  if (!(await currentUser())) return Response.json({ error: "Locked" }, { status: 401 });
-  return Response.json({ photos: await listPhotos() });
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "Locked" }, { status: 401 });
+  return Response.json({ photos: await listPhotos(user.id) });
 }
 
 // Expects multipart form data with `photo` and `thumb`, both JPEGs made in the browser.

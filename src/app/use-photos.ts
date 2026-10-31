@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { Reaction } from "@/lib/reactions";
 
-export type Photo = { id: string; at: number };
+export type Photo = { id: string; at: number; reactions?: Reaction[] };
 
 export type PhotosState =
   | { status: "loading" }
@@ -96,6 +97,43 @@ export async function shrinkPhoto(file: Blob) {
     // Zero-sized canvases give their pixel memory back immediately (Safari holds on otherwise).
     full.width = full.height = thumb.width = thumb.height = 0;
   }
+}
+
+export async function reactToPhoto(id: string, emoji: string | null) {
+  const res = await fetch(`/api/photos/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ emoji }),
+  });
+  if (!res.ok) throw new Error(`Reaction failed: ${res.status}`);
+}
+
+/**
+ * Saves the full photo. On iPhone that's the share sheet, whose "Save Image" puts it in Photos
+ * (a plain download only reaches the Files app, and does nothing in a home-screen app).
+ */
+export async function downloadPhoto(photo: Photo) {
+  const res = await fetch(photoUrl(photo.id, "full"));
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  // The local date it was added, e.g. space-2026-11-01.jpg (sv-SE writes dates as YYYY-MM-DD).
+  const name = `space-${new Date(photo.at).toLocaleDateString("sv-SE")}.jpg`;
+  const file = new File([await res.blob()], name, { type: "image/jpeg" });
+  const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (apple && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+    } catch (error) {
+      // Closing the share sheet isn't a failure.
+      if ((error as DOMException).name !== "AbortError") throw error;
+    }
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 export async function uploadPhoto(file: Blob) {

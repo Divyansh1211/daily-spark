@@ -64,6 +64,13 @@ function open() {
     );
     CREATE INDEX IF NOT EXISTS events_starts ON events (starts_at);
     CREATE INDEX IF NOT EXISTS events_feed ON events (feed_id);
+    CREATE TABLE IF NOT EXISTS photo_reactions (
+      photo_id TEXT NOT NULL,        -- photos live on disk, so no foreign key
+      user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      emoji TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (photo_id, user_id) -- one reaction each, like a tapback
+    );
   `);
   return db;
 }
