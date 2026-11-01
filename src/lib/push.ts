@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import webpush, { type PushSubscription as WebPushSubscription, WebPushError } from "web-push";
+import { listPeople, type User } from "./auth";
 import { getDaily } from "./daily";
 import { store, type Reminder } from "./store";
 
@@ -50,6 +51,23 @@ export async function sendPush(deviceId: string, payload: PushPayload) {
     }
     throw error;
   }
+}
+
+/** Tells everyone else, on every device they have notifications on, that `from` reacted to a photo. */
+export async function sendReactionPush(from: User, photoId: string, emoji: string) {
+  const others = listPeople().filter((p) => p.id !== from.id);
+  const devices = (await Promise.all(others.map((p) => store.listUserDevices(p.id)))).flat();
+  const results = await Promise.allSettled(
+    devices.map((deviceId) =>
+      sendPush(deviceId, {
+        title: "Space",
+        body: `${from.name} reacted ${emoji} to a photo`,
+        // Changing the reaction replaces the notification instead of stacking another.
+        tag: `reaction-${photoId}-${from.id}`,
+      }),
+    ),
+  );
+  for (const r of results) if (r.status === "rejected") console.error("Reaction push failed", r.reason);
 }
 
 /** Sends every reminder that is due and reschedules or removes it. */

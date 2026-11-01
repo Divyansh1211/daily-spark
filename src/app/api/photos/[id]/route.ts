@@ -1,5 +1,6 @@
-import type { NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { currentUser } from "@/lib/auth";
+import { sendReactionPush } from "@/lib/push";
 import { deletePhoto, photoExists, readPhoto, setReaction } from "@/lib/photos";
 import { isReaction } from "@/lib/reactions";
 
@@ -36,5 +37,7 @@ export async function PUT(request: NextRequest, ctx: RouteContext<"/api/photos/[
   if (emoji !== null && !isReaction(emoji)) return new Response("Unknown reaction", { status: 400 });
   if (!(await photoExists(id))) return new Response("Not found", { status: 404 });
   setReaction(id, user.id, emoji);
+  // Sent once the response is out, so reacting feels instant.
+  if (emoji) after(() => sendReactionPush(user, id, emoji));
   return new Response(null, { status: 204 });
 }
