@@ -4,9 +4,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { User } from "@/lib/auth";
 import { logoutAction } from "./auth-actions";
+import { WalletIcon } from "./icons";
 
-/** The person's initial in the header; tapping it shows who is logged in and a log out button. */
-export function AccountMenu({ user }: { user: User }) {
+/** The person's initial in the header; tapping it shows who is logged in, Expenses and a log out button. */
+export function AccountMenu({ user, onExpenses }: { user: User; onExpenses: () => void }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,9 +45,15 @@ export function AccountMenu({ user }: { user: User }) {
           <p className="text-xs text-muted">Logged in as</p>
           <p className="truncate font-medium">{user.name}</p>
           <button
+            onClick={() => (setOpen(false), onExpenses())}
+            className="mt-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium ring-1 ring-inset ring-line transition-colors hover:bg-accent-soft active:scale-[0.98]"
+          >
+            <WalletIcon className="text-accent" /> Expenses
+          </button>
+          <button
             onClick={logOut}
             disabled={busy}
-            className="mt-3 w-full rounded-xl px-3 py-2.5 text-sm font-medium text-red-500 ring-1 ring-inset ring-line transition-colors hover:bg-red-500/10 active:scale-[0.98] disabled:opacity-60"
+            className="mt-2 w-full rounded-xl px-3 py-2.5 text-sm font-medium text-red-500 ring-1 ring-inset ring-line transition-colors hover:bg-red-500/10 active:scale-[0.98] disabled:opacity-60"
           >
             {busy ? "Logging out…" : "Log out"}
           </button>
