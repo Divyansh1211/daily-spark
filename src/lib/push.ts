@@ -53,21 +53,32 @@ export async function sendPush(deviceId: string, payload: PushPayload) {
   }
 }
 
-/** Tells everyone else, on every device they have notifications on, that `from` reacted to a photo. */
-export async function sendReactionPush(from: User, photoId: string, emoji: string) {
+/** Sends a push to everyone except `from`, on every device they have notifications on. */
+async function notifyOthers(from: User, payload: PushPayload) {
   const others = listPeople().filter((p) => p.id !== from.id);
   const devices = (await Promise.all(others.map((p) => store.listUserDevices(p.id)))).flat();
-  const results = await Promise.allSettled(
-    devices.map((deviceId) =>
-      sendPush(deviceId, {
-        title: "Space",
-        body: `${from.name} reacted ${emoji} to a photo`,
-        // Changing the reaction replaces the notification instead of stacking another.
-        tag: `reaction-${photoId}-${from.id}`,
-      }),
-    ),
-  );
-  for (const r of results) if (r.status === "rejected") console.error("Reaction push failed", r.reason);
+  const results = await Promise.allSettled(devices.map((deviceId) => sendPush(deviceId, payload)));
+  for (const r of results) if (r.status === "rejected") console.error("[push] failed", payload.tag, r.reason);
+}
+
+/** Tells everyone else that `from` reacted to a photo. */
+export function sendReactionPush(from: User, photoId: string, emoji: string) {
+  return notifyOthers(from, {
+    title: "Space",
+    body: `${from.name} reacted ${emoji} to a photo`,
+    // Changing the reaction replaces the notification instead of stacking another.
+    tag: `reaction-${photoId}-${from.id}`,
+  });
+}
+
+/** Tells everyone else that `from` added a photo. */
+export function sendPhotoPush(from: User) {
+  return notifyOthers(from, {
+    title: "Space",
+    body: `${from.name} added a photo`,
+    // Uploading several at once shows one notification rather than a pile of them.
+    tag: `photo-${from.id}`,
+  });
 }
 
 /** Sends every reminder that is due and reschedules or removes it. */

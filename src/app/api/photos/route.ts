@@ -1,5 +1,7 @@
+import { after } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { listPhotos, savePhoto } from "@/lib/photos";
+import { sendPhotoPush } from "@/lib/push";
 
 const MAX_FULL_BYTES = 8 * 1024 * 1024;
 const MAX_THUMB_BYTES = 1024 * 1024;
@@ -12,7 +14,8 @@ export async function GET() {
 
 // Expects multipart form data with `photo` and `thumb`, both JPEGs made in the browser.
 export async function POST(request: Request) {
-  if (!(await currentUser())) return Response.json({ error: "Locked" }, { status: 401 });
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "Locked" }, { status: 401 });
 
   const form = await request.formData().catch(() => null);
   const photo = form?.get("photo");
@@ -30,7 +33,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Not a JPEG" }, { status: 400 });
   }
 
-  return Response.json(await savePhoto(full, small), { status: 201 });
+  const saved = await savePhoto(full, small);
+  // Sent once the response is out, so the upload finishes without waiting on it.
+  after(() => sendPhotoPush(user));
+  return Response.json(saved, { status: 201 });
 }
 
 function isJpeg(data: Buffer) {
