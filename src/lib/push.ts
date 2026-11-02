@@ -53,12 +53,32 @@ export async function sendPush(deviceId: string, payload: PushPayload) {
   }
 }
 
-/** Sends a push to everyone except `from`, on every device they have notifications on. */
-async function notifyOthers(from: User, payload: PushPayload) {
-  const others = listPeople().filter((p) => p.id !== from.id);
-  const devices = (await Promise.all(others.map((p) => store.listUserDevices(p.id)))).flat();
+/** Sends a push to each of `userIds`, on every device they have notifications on. */
+async function notifyUsers(userIds: string[], payload: PushPayload) {
+  const devices = (await Promise.all(userIds.map((id) => store.listUserDevices(id)))).flat();
   const results = await Promise.allSettled(devices.map((deviceId) => sendPush(deviceId, payload)));
   for (const r of results) if (r.status === "rejected") console.error("[push] failed", payload.tag, r.reason);
+}
+
+/** Sends a push to everyone except `from`. */
+function notifyOthers(from: User, payload: PushPayload) {
+  return notifyUsers(
+    listPeople()
+      .filter((p) => p.id !== from.id)
+      .map((p) => p.id),
+    payload,
+  );
+}
+
+/** Tells `to` that `from` suggested something for them, or added something for both of them (`to` omitted). */
+export function sendShelfSuggestionPush(from: User, to: string | null, itemId: string, what: string) {
+  const payload = { title: "Space", body: `${from.name} ${to ? "suggested" : "added for you both:"} ${what}`, tag: `shelf-${itemId}` };
+  return to ? notifyUsers([to], payload) : notifyOthers(from, payload);
+}
+
+/** Tells whoever suggested something that `from` finished it. */
+export function sendShelfFinishedPush(from: User, to: string, itemId: string, what: string) {
+  return notifyUsers([to], { title: "Space", body: `${from.name} finished ${what} ✨`, tag: `shelf-done-${itemId}` });
 }
 
 /** Tells everyone else that `from` reacted to a photo. */

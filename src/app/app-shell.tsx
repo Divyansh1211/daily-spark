@@ -5,9 +5,10 @@ import type { User } from "@/lib/auth";
 import { AccountMenu } from "./account-menu";
 import { Calendar } from "./calendar";
 import { Expenses } from "./expenses";
-import { BellIcon, CalendarIcon, ImageIcon, SunIcon, WalletIcon } from "./icons";
+import { BellIcon, BookIcon, CalendarIcon, ImageIcon, SunIcon, WalletIcon } from "./icons";
 import { Photos } from "./photos";
 import { RemindersApp } from "./reminders-app";
+import { Shelf } from "./shelf";
 import { ThemeToggle } from "./theme-toggle";
 import { Today } from "./today";
 
@@ -15,6 +16,7 @@ const TABS = [
   { id: "today", label: "Today", Icon: SunIcon },
   { id: "calendar", label: "Calendar", Icon: CalendarIcon },
   { id: "photos", label: "Photos", Icon: ImageIcon },
+  { id: "shelf", label: "Shelf", Icon: BookIcon },
   { id: "expenses", label: "Expenses", Icon: WalletIcon },
   { id: "reminders", label: "Reminders", Icon: BellIcon },
 ] as const;
@@ -23,6 +25,7 @@ const HEADINGS = {
   today: { title: "Haanji", subtitle: null },
   calendar: { title: "Calendar", subtitle: "What we're both up to" },
   photos: { title: "Photos", subtitle: "Our little moments" },
+  shelf: { title: "Shelf", subtitle: "Reading, watching, saving for later" },
   expenses: { title: "Expenses", subtitle: "Just for you" },
   reminders: { title: "Reminders", subtitle: "Stay on track" },
 } as const;
@@ -71,6 +74,9 @@ export function AppShell({ user }: { user: User }) {
         </div>
         <div hidden={tab !== "photos"} className="animate-rise">
           <Photos />
+        </div>
+        <div hidden={tab !== "shelf"} className="animate-rise">
+          <Shelf />
         </div>
         <div hidden={tab !== "expenses"} className="animate-rise">
           <Expenses />

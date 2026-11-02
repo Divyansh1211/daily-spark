@@ -71,6 +71,18 @@ function open() {
       created_at INTEGER NOT NULL,
       PRIMARY KEY (photo_id, user_id) -- one reaction each, like a tapback
     );
+    CREATE TABLE IF NOT EXISTS shelf_items (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      kind TEXT NOT NULL,            -- book, article, movie, show
+      status TEXT NOT NULL,          -- want (up next), now, done
+      owner TEXT REFERENCES users (id) ON DELETE CASCADE, -- who it's for; null when it's for both
+      added_by TEXT REFERENCES users (id) ON DELETE SET NULL,
+      link TEXT,
+      note TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
   return db;
 }
