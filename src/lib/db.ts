@@ -74,7 +74,7 @@ function open() {
     CREATE TABLE IF NOT EXISTS shelf_items (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
-      kind TEXT NOT NULL,            -- book, article, movie, show
+      kind TEXT NOT NULL,            -- book, article, movie, show, song
       status TEXT NOT NULL,          -- want (up next), now, done
       owner TEXT REFERENCES users (id) ON DELETE CASCADE, -- who it's for; null when it's for both
       added_by TEXT REFERENCES users (id) ON DELETE SET NULL,

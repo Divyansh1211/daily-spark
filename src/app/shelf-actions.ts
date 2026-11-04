@@ -73,7 +73,8 @@ export async function setShelfStatusAction(id: string, status: string) {
   // Let whoever suggested it know it's been read or watched.
   const { item, addedBy } = found;
   if (status === "done" && item.status !== "done" && addedBy && addedBy !== user.id) {
-    after(() => sendShelfFinishedPush(user, addedBy, id, `${kind(item.kind).emoji} ${item.title}`));
+    const k = kind(item.kind);
+    after(() => sendShelfFinishedPush(user, addedBy, id, `${k.finished} ${k.emoji} ${item.title}`));
   }
   return { ok: true };
 }

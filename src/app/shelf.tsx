@@ -160,16 +160,16 @@ function AddToShelf({ people, me, onAdded }: { people: User[]; me: string; onAdd
         onClick={() => setOpen(true)}
         className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line bg-card py-3.5 text-sm font-medium text-accent transition-all active:scale-[0.98]"
       >
-        <PlusIcon /> Add a book, movie or more
+        <PlusIcon /> Add a book, movie, song or more
       </button>
     );
   }
 
-  const doing = kind(what).doing;
+  const { doing, did, placeholder } = kind(what);
 
   return (
     <form onSubmit={submit} className="animate-rise space-y-3 rounded-3xl border border-line bg-card p-5">
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-5 gap-1.5">
         {KINDS.map((k) => (
           <button
             key={k.id}
@@ -190,7 +190,7 @@ function AddToShelf({ people, me, onAdded }: { people: User[]; me: string; onAdd
         autoFocus
         required
         maxLength={120}
-        placeholder={what === "movie" || what === "show" ? "Title" : what === "article" ? "Headline" : "Title and author"}
+        placeholder={placeholder}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         aria-label="Title"
@@ -224,7 +224,7 @@ function AddToShelf({ people, me, onAdded }: { people: User[]; me: string; onAdd
           <div className="flex flex-wrap gap-2">
             {STATUSES.map((s) => (
               <Chip key={s.id} on={status === s.id} onClick={() => setStatus(s.id)}>
-                {s.id === "now" ? doing : s.id === "done" ? (doing === "Reading" ? "Read it" : "Watched it") : s.label}
+                {s.id === "now" ? doing : s.id === "done" ? did : s.label}
               </Chip>
             ))}
           </div>
@@ -280,7 +280,7 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 const EMPTY: Record<Status, { emoji: string; title: string; hint: string }> = {
   now: { emoji: "🍿", title: "Nothing on the go", hint: "Start something from Up next, or add what you're into." },
   want: { emoji: "📚", title: "Nothing lined up", hint: "Add something you want to get to, or suggest one." },
-  done: { emoji: "✨", title: "Nothing finished yet", hint: "Things you've read and watched end up here." },
+  done: { emoji: "✨", title: "Nothing finished yet", hint: "Things you've read, watched and heard end up here." },
 };
 
 function ShelfList({

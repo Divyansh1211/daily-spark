@@ -1,9 +1,10 @@
 // What can go on the shelf. Shared by the server (to validate) and the Shelf tab.
 export const KINDS = [
-  { id: "book", label: "Book", emoji: "📖", doing: "Reading" },
-  { id: "article", label: "Article", emoji: "📰", doing: "Reading" },
-  { id: "movie", label: "Movie", emoji: "🎬", doing: "Watching" },
-  { id: "show", label: "Show", emoji: "📺", doing: "Watching" },
+  { id: "book", label: "Book", emoji: "📖", doing: "Reading", did: "Read it", finished: "finished", placeholder: "Title and author" },
+  { id: "article", label: "Article", emoji: "📰", doing: "Reading", did: "Read it", finished: "finished", placeholder: "Headline" },
+  { id: "movie", label: "Movie", emoji: "🎬", doing: "Watching", did: "Watched it", finished: "finished", placeholder: "Title" },
+  { id: "show", label: "Show", emoji: "📺", doing: "Watching", did: "Watched it", finished: "finished", placeholder: "Title" },
+  { id: "song", label: "Song", emoji: "🎵", doing: "Listening", did: "Heard it", finished: "listened to", placeholder: "Song and artist" },
 ] as const;
 
 export const STATUSES = [

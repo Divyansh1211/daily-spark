@@ -76,9 +76,9 @@ export function sendShelfSuggestionPush(from: User, to: string | null, itemId: s
   return to ? notifyUsers([to], payload) : notifyOthers(from, payload);
 }
 
-/** Tells whoever suggested something that `from` finished it. */
+/** Tells whoever suggested something that `from` finished it; `what` starts with the verb, e.g. "finished 📖 Dune". */
 export function sendShelfFinishedPush(from: User, to: string, itemId: string, what: string) {
-  return notifyUsers([to], { title: "Space", body: `${from.name} finished ${what} ✨`, tag: `shelf-done-${itemId}` });
+  return notifyUsers([to], { title: "Space", body: `${from.name} ${what} ✨`, tag: `shelf-done-${itemId}` });
 }
 
 /** Tells everyone else that `from` reacted to a photo. */
