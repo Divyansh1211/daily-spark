@@ -114,7 +114,6 @@ export async function addFeed(owner: string, url: string): Promise<AddFeedResult
   let parsed: { name: string | null; events: ParsedEvent[] };
   try {
     parsed = parseFeed(await download(url), Date.now());
-    checkNotBusyOnly(url, parsed.events);
   } catch (error) {
     return { ok: false, error: describe(error) };
   }
@@ -156,7 +155,6 @@ export async function syncStaleFeeds(now = Date.now()) {
         busy.add(feed.id);
         try {
           const { events } = parseFeed(await download(feed.url), now);
-          checkNotBusyOnly(feed.url, events);
           // The feed may have been removed while it downloaded.
           if (!db().prepare("SELECT 1 FROM calendar_feeds WHERE id = ?").get(feed.id)) return;
           replaceFeedEvents(feed.id, feed.owner, events);
@@ -188,17 +186,6 @@ function replaceFeedEvents(feedId: string, owner: string, events: ParsedEvent[])
 }
 
 class FeedError extends Error {}
-
-/** Google's public address only says "Busy" for each event, unless the calendar itself is public. */
-function checkNotBusyOnly(url: string, events: ParsedEvent[]) {
-  const { hostname, pathname } = new URL(url);
-  if (hostname !== "calendar.google.com" || !pathname.includes("/public/")) return;
-  if (events.length > 0 && events.every((e) => e.title === "Busy")) {
-    throw new FeedError(
-      'That\'s Google\'s public address, so every event just says "Busy". Remove it and link the "Secret address in iCal format" instead.',
-    );
-  }
-}
 
 function describe(error: unknown) {
   if (error instanceof FeedError) return error.message;
