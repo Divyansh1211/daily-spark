@@ -81,21 +81,28 @@ export function sendShelfFinishedPush(from: User, to: string, itemId: string, wh
   return notifyUsers([to], { title: "Space", body: `${from.name} ${what} ✨`, tag: `shelf-done-${itemId}` });
 }
 
+/** Where tapping a notification about a photo goes: the app, opened on that photo. */
+function photoLink(photoId: string) {
+  return `/?photo=${photoId}`;
+}
+
 /** Tells everyone else that `from` reacted to a photo. */
 export function sendReactionPush(from: User, photoId: string, emoji: string) {
   return notifyOthers(from, {
     title: "Space",
     body: `${from.name} reacted ${emoji} to a photo`,
+    url: photoLink(photoId),
     // Changing the reaction replaces the notification instead of stacking another.
     tag: `reaction-${photoId}-${from.id}`,
   });
 }
 
-/** Tells everyone else that `from` added a photo. */
-export function sendPhotoPush(from: User) {
+/** Tells everyone else that `from` added a photo; tapping it opens `photoId`. */
+export function sendPhotoPush(from: User, photoId: string) {
   return notifyOthers(from, {
     title: "Space",
     body: `${from.name} added a photo`,
+    url: photoLink(photoId),
     // Uploading several at once shows one notification rather than a pile of them.
     tag: `photo-${from.id}`,
   });

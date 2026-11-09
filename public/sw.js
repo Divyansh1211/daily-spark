@@ -30,7 +30,11 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
       const open = windows.find((w) => w.url.startsWith(self.location.origin));
-      if (open) return open.focus();
+      if (open) {
+        // The app is already running: tell it where to go rather than reloading it.
+        open.postMessage({ open: url });
+        return open.focus();
+      }
       return self.clients.openWindow(url);
     }),
   );

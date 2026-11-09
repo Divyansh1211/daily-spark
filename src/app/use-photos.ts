@@ -9,7 +9,7 @@ export type PhotosState =
   | { status: "loading" }
   | { status: "locked" }
   | { status: "error" }
-  | { status: "ready"; photos: Photo[]; total: number; hasMore: boolean };
+  | { status: "ready"; photos: Photo[]; total: number; hasMore: boolean; fetchedAt: number };
 
 type PhotoPage = { photos: Photo[]; total: number; next: string | null };
 
@@ -42,6 +42,43 @@ function useReloadOnChange(load: () => void) {
   }, [load]);
 }
 
+/** A photo to open, and when it was asked for, so a list fetched before then isn't trusted to be missing it. */
+export type PhotoTarget = { id: string; at: number };
+
+/**
+ * The photo a tapped notification points at: from the link the app opened with, or from the
+ * service worker when the app was already open. `onTarget` runs each time one arrives.
+ */
+export function useNotificationPhoto(onTarget: () => void) {
+  const [target, setTarget] = useState<PhotoTarget | null>(null);
+
+  useEffect(() => {
+    const show = (url: string) => {
+      const id = new URL(url, location.href).searchParams.get("photo");
+      if (!id) return;
+      setTarget({ id, at: Date.now() });
+      onTarget();
+      // It may have been added after the list was last fetched.
+      notifyPhotosChanged();
+    };
+    // Deferred so it doesn't set state synchronously inside the effect.
+    const first = setTimeout(() => {
+      if (!new URLSearchParams(location.search).has("photo")) return;
+      show(location.href);
+      // Drop it from the address so reloading doesn't open the photo again.
+      history.replaceState(history.state, "", location.pathname);
+    }, 0);
+    const onMessage = (e: MessageEvent) => typeof e.data?.open === "string" && show(e.data.open);
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => {
+      clearTimeout(first);
+      navigator.serviceWorker?.removeEventListener("message", onMessage);
+    };
+  }, [onTarget]);
+
+  return [target, useCallback(() => setTarget(null), [])] as const;
+}
+
 /** Photos from the server, newest first, a page at a time; `loadMore` fetches the next page. */
 export function usePhotos() {
   const [state, setState] = useState<PhotosState>({ status: "loading" });
@@ -57,7 +94,13 @@ export function usePhotos() {
       if (!res.ok) throw new Error(`Request failed: ${res.status}`);
       const page = (await res.json()) as PhotoPage;
       next.current = page.next;
-      setState({ status: "ready", photos: page.photos, total: page.total, hasMore: page.next !== null });
+      setState({
+        status: "ready",
+        photos: page.photos,
+        total: page.total,
+        hasMore: page.next !== null,
+        fetchedAt: Date.now(),
+      });
     } catch {
       setState((s) => (s.status === "ready" ? s : { status: "error" }));
     }
@@ -79,7 +122,7 @@ export function usePhotos() {
         if (s.status !== "ready") return s;
         const have = new Set(s.photos.map((p) => p.id));
         const photos = [...s.photos, ...page.photos.filter((p) => !have.has(p.id))];
-        return { status: "ready", photos, total: page.total, hasMore: page.next !== null };
+        return { status: "ready", photos, total: page.total, hasMore: page.next !== null, fetchedAt: Date.now() };
       });
     } catch {
       // Left as it was; scrolling to the end again retries.

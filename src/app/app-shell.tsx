@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import type { User } from "@/lib/auth";
 import { AccountMenu } from "./account-menu";
 import { Calendar } from "./calendar";
@@ -12,6 +12,7 @@ import { Shelf } from "./shelf";
 import { ThemeToggle } from "./theme-toggle";
 import { Today } from "./today";
 import { useCloseOnBack } from "./use-close-on-back";
+import { useNotificationPhoto } from "./use-photos";
 
 const TABS = [
   { id: "today", label: "Today", Icon: SunIcon },
@@ -46,6 +47,7 @@ export function AppShell({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>("today");
   // Reminders live inside the Calendar tab, behind a switch.
   const [calendarView, setCalendarView] = useState<"calendar" | "reminders">("calendar");
+  const [photoTarget, clearPhotoTarget] = useNotificationPhoto(useCallback(() => setTab("photos"), []));
   const hello = useSyncExternalStore(noSubscribe, greeting, () => "Hello");
   const activeIndex = TABS.findIndex((t) => t.id === tab);
   const heading = HEADINGS[tab === "calendar" ? calendarView : tab];
@@ -104,7 +106,7 @@ export function AppShell({ user }: { user: User }) {
           </div>
         </div>
         <div hidden={tab !== "photos"} className="animate-rise">
-          <Photos />
+          <Photos target={photoTarget} onTargetDone={clearPhotoTarget} />
         </div>
         <div hidden={tab !== "shelf"} className="animate-rise">
           <Shelf />

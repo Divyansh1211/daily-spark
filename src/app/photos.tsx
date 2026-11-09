@@ -23,10 +23,12 @@ import {
   uploadPhoto,
   usePhotos,
   type Photo,
+  type PhotoTarget,
 } from "./use-photos";
 import { useCloseOnBack } from "./use-close-on-back";
 
-export function Photos() {
+/** `target` is a photo to open (from a tapped notification); `onTargetDone` runs once it's opened or found gone. */
+export function Photos({ target, onTargetDone }: { target: PhotoTarget | null; onTargetDone: () => void }) {
   const { state, loadMore } = usePhotos();
 
   if (state.status === "loading") {
@@ -46,19 +48,35 @@ export function Photos() {
       </div>
     );
   }
-  return <Gallery photos={state.photos} total={state.total} hasMore={state.hasMore} loadMore={loadMore} />;
+  return (
+    <Gallery
+      photos={state.photos}
+      total={state.total}
+      hasMore={state.hasMore}
+      fetchedAt={state.fetchedAt}
+      loadMore={loadMore}
+      target={target}
+      onTargetDone={onTargetDone}
+    />
+  );
 }
 
 function Gallery({
   photos,
   total,
   hasMore,
+  fetchedAt,
   loadMore,
+  target,
+  onTargetDone,
 }: {
   photos: Photo[];
   total: number;
   hasMore: boolean;
+  fetchedAt: number;
   loadMore: () => void;
+  target: PhotoTarget | null;
+  onTargetDone: () => void;
 }) {
   const [uploading, setUploading] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +97,26 @@ function Gallery({
     observer.observe(node);
     return () => observer.disconnect();
   }, [hasMore, loadMore, photos.length]);
+
+  // Open the photo a notification was about, paging through until it's loaded.
+  useEffect(() => {
+    if (!target) return;
+    const i = photos.findIndex((p) => p.id === target.id);
+    if (i >= 0) {
+      // Deferred so it doesn't set state synchronously inside the effect.
+      const t = setTimeout(() => {
+        setOpen(i);
+        onTargetDone();
+      }, 0);
+      return () => clearTimeout(t);
+    }
+    if (hasMore) {
+      loadMore();
+    } else if (fetchedAt > target.at) {
+      // Every photo is loaded and it isn't one of them: it was deleted.
+      onTargetDone();
+    }
+  }, [target, photos, hasMore, fetchedAt, loadMore, onTargetDone]);
 
   function openPhoto(i: number) {
     setOpen(i);

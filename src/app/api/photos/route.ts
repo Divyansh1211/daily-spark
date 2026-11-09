@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
   const saved = await savePhoto(full, small);
   // Sent once the response is out, so the upload finishes without waiting on it.
-  after(() => sendPhotoPush(user));
+  after(() => sendPhotoPush(user, saved.id));
   return Response.json(saved, { status: 201 });
 }
 
