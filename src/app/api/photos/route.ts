@@ -1,15 +1,32 @@
-import { after } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { listPhotos, savePhoto } from "@/lib/photos";
+import { isPhotoId, listPhotoPage, nthPhoto, savePhoto } from "@/lib/photos";
 import { sendPhotoPush } from "@/lib/push";
 
 const MAX_FULL_BYTES = 8 * 1024 * 1024;
 const MAX_THUMB_BYTES = 1024 * 1024;
 
-export async function GET() {
+// High enough that refreshing everything already scrolled through fits in one request.
+const MAX_PAGE = 1000;
+
+// GET /api/photos?limit=60&before={id} gives a page of photos, newest first; pass the
+// previous page's `next` as `before` to get the one after it.
+// GET /api/photos?nth=123 gives just the 123rd photo (wrapping around), for the photo of the day.
+export async function GET(request: NextRequest) {
   const user = await currentUser();
   if (!user) return Response.json({ error: "Locked" }, { status: 401 });
-  return Response.json({ photos: await listPhotos(user.id) });
+  const params = request.nextUrl.searchParams;
+
+  const nth = params.get("nth");
+  if (nth !== null) {
+    if (!/^\d{1,9}$/.test(nth)) return Response.json({ error: "Bad nth" }, { status: 400 });
+    return Response.json({ photo: await nthPhoto(user.id, Number(nth)) });
+  }
+
+  const before = params.get("before");
+  if (before !== null && !isPhotoId(before)) return Response.json({ error: "Bad cursor" }, { status: 400 });
+  const limit = Math.min(MAX_PAGE, Math.max(1, Number(params.get("limit")) || 60));
+  return Response.json(await listPhotoPage(user.id, before, limit));
 }
 
 // Expects multipart form data with `photo` and `thumb`, both JPEGs made in the browser.

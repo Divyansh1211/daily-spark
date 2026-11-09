@@ -23,8 +23,8 @@ export function isPhotoId(id: string) {
   return ID.test(id);
 }
 
-/** All photos, oldest first, with their reactions as `viewerId` sees them. */
-export async function listPhotos(viewerId: string): Promise<Photo[]> {
+/** Every photo id, oldest first. */
+async function listPhotoIds() {
   let names: string[];
   try {
     names = await readdir(DIR);
@@ -32,29 +32,51 @@ export async function listPhotos(viewerId: string): Promise<Photo[]> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-  const reactions = reactionsByPhoto(viewerId);
   return names
     .filter((n) => n.endsWith(".jpg") && !n.endsWith(".thumb.jpg"))
     .map((n) => n.slice(0, -4))
     .filter(isPhotoId)
-    .sort()
-    .map((id) => ({ id, at: Number(id.slice(0, 13)), reactions: reactions.get(id) ?? [] }));
+    .sort();
 }
 
-function reactionsByPhoto(viewerId: string) {
+export type PhotoPage = { photos: Photo[]; total: number; next: string | null };
+
+/**
+ * Up to `limit` photos, newest first, starting after the photo `before` (the previous page's
+ * `next`). Paging by id rather than by offset keeps pages steady while new photos arrive.
+ */
+export async function listPhotoPage(viewerId: string, before: string | null, limit: number): Promise<PhotoPage> {
+  const ids = (await listPhotoIds()).reverse();
+  const start = before ? ids.findIndex((id) => id < before) : 0;
+  const page = start < 0 ? [] : ids.slice(start, start + limit);
+  const more = start >= 0 && start + limit < ids.length;
+  return { photos: withReactions(page, viewerId), total: ids.length, next: more ? page[page.length - 1] : null };
+}
+
+/** The `n`th photo (oldest first, wrapping around), so each day can show a different one. */
+export async function nthPhoto(viewerId: string, n: number): Promise<Photo | null> {
+  const ids = await listPhotoIds();
+  if (ids.length === 0) return null;
+  return withReactions([ids[((n % ids.length) + ids.length) % ids.length]], viewerId)[0];
+}
+
+/** Photos for `ids`, with their reactions as `viewerId` sees them. */
+function withReactions(ids: string[], viewerId: string): Photo[] {
+  if (ids.length === 0) return [];
   const rows = db()
     .prepare(
       `SELECT r.photo_id, r.user_id, r.emoji, u.name FROM photo_reactions r
-       JOIN users u ON u.id = r.user_id ORDER BY r.created_at`,
+       JOIN users u ON u.id = r.user_id
+       WHERE r.photo_id IN (${ids.map(() => "?").join(", ")}) ORDER BY r.created_at`,
     )
-    .all() as { photo_id: string; user_id: string; emoji: string; name: string }[];
+    .all(...ids) as { photo_id: string; user_id: string; emoji: string; name: string }[];
   const byPhoto = new Map<string, Reaction[]>();
   for (const r of rows) {
     const list = byPhoto.get(r.photo_id) ?? [];
     list.push({ emoji: r.emoji, name: r.name, mine: r.user_id === viewerId });
     byPhoto.set(r.photo_id, list);
   }
-  return byPhoto;
+  return ids.map((id) => ({ id, at: Number(id.slice(0, 13)), reactions: byPhoto.get(id) ?? [] }));
 }
 
 export async function photoExists(id: string) {

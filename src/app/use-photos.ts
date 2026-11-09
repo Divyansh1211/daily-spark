@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Reaction } from "@/lib/reactions";
 
 export type Photo = { id: string; at: number; reactions?: Reaction[] };
@@ -9,7 +9,11 @@ export type PhotosState =
   | { status: "loading" }
   | { status: "locked" }
   | { status: "error" }
-  | { status: "ready"; photos: Photo[] };
+  | { status: "ready"; photos: Photo[]; total: number; hasMore: boolean };
+
+type PhotoPage = { photos: Photo[]; total: number; next: string | null };
+
+const PAGE = 60;
 
 // The Photos tab and the Today tab both show photos; this event keeps them in sync.
 const CHANGED = "haanji:photos-changed";
@@ -22,36 +26,88 @@ export function photoUrl(id: string, size: "full" | "thumb") {
   return size === "thumb" ? `/api/photos/${id}?size=thumb` : `/api/photos/${id}`;
 }
 
-/** Photos from the server, oldest first, refreshed whenever they change. */
+/** Runs `load` now, whenever photos change, and whenever the app comes back to the foreground. */
+function useReloadOnChange(load: () => void) {
+  useEffect(() => {
+    // Deferred so it doesn't set state synchronously inside the effect.
+    const first = setTimeout(load, 0);
+    const onVisible = () => document.visibilityState === "visible" && load();
+    window.addEventListener(CHANGED, load);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(first);
+      window.removeEventListener(CHANGED, load);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
+}
+
+/** Photos from the server, newest first, a page at a time; `loadMore` fetches the next page. */
 export function usePhotos() {
   const [state, setState] = useState<PhotosState>({ status: "loading" });
+  // How many photos are loaded, so a refresh keeps the pages already scrolled through.
+  const loaded = useRef(PAGE);
+  const next = useRef<string | null>(null);
+  const loadingMore = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/photos", { cache: "no-store" });
+      const res = await fetch(`/api/photos?limit=${loaded.current}`, { cache: "no-store" });
       if (res.status === 401) return setState({ status: "locked" });
       if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-      const { photos } = (await res.json()) as { photos: Photo[] };
-      setState({ status: "ready", photos });
+      const page = (await res.json()) as PhotoPage;
+      next.current = page.next;
+      setState({ status: "ready", photos: page.photos, total: page.total, hasMore: page.next !== null });
     } catch {
       setState((s) => (s.status === "ready" ? s : { status: "error" }));
     }
   }, []);
 
-  useEffect(() => {
-    // Defer the first load so it doesn't set state synchronously inside the effect.
-    const first = setTimeout(refresh, 0);
-    const onVisible = () => document.visibilityState === "visible" && refresh();
-    window.addEventListener(CHANGED, refresh);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearTimeout(first);
-      window.removeEventListener(CHANGED, refresh);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [refresh]);
+  const loadMore = useCallback(async () => {
+    const before = next.current;
+    if (!before || loadingMore.current) return;
+    loadingMore.current = true;
+    try {
+      const res = await fetch(`/api/photos?limit=${PAGE}&before=${before}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+      const page = (await res.json()) as PhotoPage;
+      // A refresh that ended somewhere else in the meantime makes this page stale.
+      if (next.current !== before) return;
+      next.current = page.next;
+      loaded.current += page.photos.length;
+      setState((s) => {
+        if (s.status !== "ready") return s;
+        const have = new Set(s.photos.map((p) => p.id));
+        const photos = [...s.photos, ...page.photos.filter((p) => !have.has(p.id))];
+        return { status: "ready", photos, total: page.total, hasMore: page.next !== null };
+      });
+    } catch {
+      // Left as it was; scrolling to the end again retries.
+    } finally {
+      loadingMore.current = false;
+    }
+  }, []);
 
-  return state;
+  useReloadOnChange(refresh);
+  return { state, loadMore };
+}
+
+/** One photo for the day number `day`, a different one each day; null when there are none (or no access). */
+export function usePhotoOfTheDay(day: number) {
+  const [photo, setPhoto] = useState<Photo | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/photos?nth=${day}`, { cache: "no-store" });
+      if (res.status === 401) return setPhoto(null);
+      if (res.ok) setPhoto(((await res.json()) as { photo: Photo | null }).photo);
+    } catch {
+      // Keeps showing the last one.
+    }
+  }, [day]);
+
+  useReloadOnChange(load);
+  return photo;
 }
 
 function toJpeg(canvas: HTMLCanvasElement, quality: number) {

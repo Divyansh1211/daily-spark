@@ -27,7 +27,7 @@ import {
 import { useCloseOnBack } from "./use-close-on-back";
 
 export function Photos() {
-  const state = usePhotos();
+  const { state, loadMore } = usePhotos();
 
   if (state.status === "loading") {
     return (
@@ -46,17 +46,45 @@ export function Photos() {
       </div>
     );
   }
-  return <Gallery photos={state.photos} />;
+  return <Gallery photos={state.photos} total={state.total} hasMore={state.hasMore} loadMore={loadMore} />;
 }
 
-function Gallery({ photos }: { photos: Photo[] }) {
+function Gallery({
+  photos,
+  total,
+  hasMore,
+  loadMore,
+}: {
+  photos: Photo[];
+  total: number;
+  hasMore: boolean;
+  loadMore: () => void;
+}) {
   const [uploading, setUploading] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   const [camera, setCamera] = useState(false);
   const phoneCamera = useRef<HTMLInputElement>(null);
-  // Newest first in the grid.
-  const shown = [...photos].reverse();
+  const end = useRef<HTMLDivElement>(null);
+  // The photos come newest first, as the grid shows them.
+  const shown = photos;
+
+  // Fetch the next page a little before the end of the grid scrolls into view.
+  useEffect(() => {
+    const node = end.current;
+    if (!node || !hasMore) return;
+    const observer = new IntersectionObserver((entries) => entries[0].isIntersecting && loadMore(), {
+      rootMargin: "800px 0px",
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, photos.length]);
+
+  function openPhoto(i: number) {
+    setOpen(i);
+    // Swiping through the viewer also pulls in the next page before reaching the last photo.
+    if (i >= shown.length - 3) loadMore();
+  }
 
   function add(e: ChangeEvent<HTMLInputElement>) {
     const files = [...(e.target.files ?? [])];
@@ -92,7 +120,7 @@ function Gallery({ photos }: { photos: Photo[] }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between px-1">
         <p className="text-sm text-muted">
-          {photos.length === 0 ? "No photos yet" : `${photos.length} ${photos.length === 1 ? "photo" : "photos"}`}
+          {total === 0 ? "No photos yet" : `${total} ${total === 1 ? "photo" : "photos"}`}
         </p>
         <div className="flex gap-2">
           <button onClick={openCamera} className={`${secondaryButton} inline-flex items-center gap-1.5 py-2.5`}>
@@ -125,7 +153,7 @@ function Gallery({ photos }: { photos: Photo[] }) {
           {shown.map((photo, i) => (
             <li key={photo.id} style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }} className="animate-rise">
               <button
-                onClick={() => setOpen(i)}
+                onClick={() => openPhoto(i)}
                 className="relative block aspect-square w-full overflow-hidden rounded-2xl bg-line transition-transform active:scale-95"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- private images served by our own route */}
@@ -141,6 +169,14 @@ function Gallery({ photos }: { photos: Photo[] }) {
         </ul>
       )}
 
+      {hasMore && (
+        <div ref={end} className="flex justify-center">
+          <button onClick={loadMore} className={`${secondaryButton} py-2.5`}>
+            Load more
+          </button>
+        </div>
+      )}
+
       {camera && (
         <Camera
           onCapture={(photo) => upload([photo])}
@@ -153,7 +189,7 @@ function Gallery({ photos }: { photos: Photo[] }) {
       )}
 
       {open !== null && shown[open] && (
-        <Viewer photos={shown} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+        <Viewer photos={shown} total={total} index={open} onIndex={openPhoto} onClose={() => setOpen(null)} />
       )}
     </div>
   );
@@ -161,11 +197,13 @@ function Gallery({ photos }: { photos: Photo[] }) {
 
 function Viewer({
   photos,
+  total,
   index,
   onIndex,
   onClose,
 }: {
   photos: Photo[];
+  total: number;
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
@@ -248,7 +286,7 @@ function Viewer({
         <div className="text-center text-xs leading-tight text-white/60">
           <p>{new Date(photo.at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</p>
           <p>
-            {index + 1} / {photos.length}
+            {index + 1} / {total}
           </p>
         </div>
         <div className="flex gap-2">

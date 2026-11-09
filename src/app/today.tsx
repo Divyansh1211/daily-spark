@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Daily } from "@/lib/daily";
 import { CheckIcon, FlameIcon, ImageIcon, ShareIcon, ShuffleIcon } from "./icons";
-import { photoUrl, usePhotos } from "./use-photos";
+import { photoUrl, usePhotoOfTheDay } from "./use-photos";
 
 /** The user's local calendar date as YYYY-MM-DD. */
 function localDate() {
@@ -227,12 +227,9 @@ function TodaySkeleton() {
 
 /** One of the shared photos, a different one each day. Hidden until photos are unlocked and added. */
 function PhotoOfTheDay({ date }: { date: string }) {
-  const state = usePhotos();
-  if (state.status !== "ready" || state.photos.length === 0) return null;
-
   const [y, m, d] = date.split("-").map(Number);
-  const day = Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
-  const photo = state.photos[day % state.photos.length];
+  const photo = usePhotoOfTheDay(Math.floor(Date.UTC(y, m - 1, d) / 86_400_000));
+  if (!photo) return null;
 
   return (
     <section className="animate-rise relative overflow-hidden rounded-3xl bg-line">
