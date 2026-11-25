@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { User } from "@/lib/auth";
 import type { Letter } from "@/lib/letters";
 import { CheckIcon, LockIcon, TrashIcon } from "./icons";
-import { deleteLetterAction, loadLetters, openLetterAction, writeLetterAction } from "./letter-actions";
+import { deleteLetterAction, editLetterAction, loadLetters, openLetterAction, writeLetterAction } from "./letter-actions";
 
-type State = { status: "loading" } | { status: "ready"; received: Letter[]; sent: Letter[]; others: User[] };
+type State =
+  | { status: "loading" }
+  | { status: "ready"; received: Letter[]; sent: Letter[]; others: User[]; me: User };
 
 /** Letters for you, and the ones you've written, on the Today tab. Hidden until there's someone to write to. */
 export function Letters() {
@@ -55,19 +57,20 @@ export function Letters() {
       {state.received.map((letter) => (
         <Envelope key={letter.id} letter={letter} now={now} />
       ))}
-      <Write others={state.others} sent={state.sent} now={now} onChange={refresh} />
+      <Write me={state.me} others={state.others} sent={state.sent} now={now} onChange={refresh} />
     </div>
   );
 }
 
-function Envelope({ letter, now }: { letter: Letter; now: number }) {
+/** `preview` shows a letter that hasn't been sent yet, so opening it doesn't tell anyone. */
+function Envelope({ letter, now, preview = false }: { letter: Letter; now: number; preview?: boolean }) {
   const [open, setOpen] = useState(false);
   const locked = letter.body === null;
   const unread = !locked && letter.openedAt === null && !open;
 
   function toggle() {
     if (locked) return;
-    if (!open && letter.openedAt === null) openLetterAction(letter.id).catch(() => {});
+    if (!open && letter.openedAt === null && !preview) openLetterAction(letter.id).catch(() => {});
     setOpen(!open);
   }
 
@@ -78,6 +81,7 @@ function Envelope({ letter, now }: { letter: Letter; now: number }) {
       }`}
     >
       <button
+        type="button"
         onClick={toggle}
         disabled={locked}
         aria-expanded={open}
@@ -116,8 +120,23 @@ function Envelope({ letter, now }: { letter: Letter; now: number }) {
   );
 }
 
-function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]; now: number; onChange: () => void }) {
+function Write({
+  me,
+  others,
+  sent,
+  now,
+  onChange,
+}: {
+  me: User;
+  others: User[];
+  sent: Letter[];
+  now: number;
+  onChange: () => void;
+}) {
   const [writing, setWriting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  // The sent letter being changed, or null when writing a new one.
+  const [editing, setEditing] = useState<string | null>(null);
   const [to, setTo] = useState(others[0].id);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -127,6 +146,30 @@ function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]
   const [error, setError] = useState<string | null>(null);
   const name = others.find((p) => p.id === to)?.name ?? others[0].name;
 
+  function close() {
+    setWriting(false);
+    setPreviewing(false);
+    setEditing(null);
+    setTitle("");
+    setBody("");
+    setTimed(false);
+    setWhen("");
+    setError(null);
+  }
+
+  function edit(letter: Letter) {
+    setEditing(letter.id);
+    setTo(letter.toId);
+    setTitle(letter.title);
+    setBody(letter.body ?? "");
+    const sealed = letter.opensAt !== null && letter.opensAt > now;
+    setTimed(sealed);
+    setWhen(sealed ? localInput(letter.opensAt!) : "");
+    setPreviewing(false);
+    setError(null);
+    setWriting(true);
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -134,13 +177,11 @@ function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]
     try {
       // datetime-local is in this phone's local time; turn it into an absolute time here.
       const opensAt = timed && when ? new Date(when).getTime() : null;
-      const result = await writeLetterAction({ to, title, body, opensAt });
+      const result = editing
+        ? await editLetterAction(editing, { title, body, opensAt })
+        : await writeLetterAction({ to, title, body, opensAt });
       if (!result.ok) return setError(result.error);
-      setWriting(false);
-      setTitle("");
-      setBody("");
-      setTimed(false);
-      setWhen("");
+      close();
       onChange();
     } catch {
       setError("Couldn't send it. Check your connection and try again.");
@@ -153,7 +194,8 @@ function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]
     <div className="space-y-3">
       {writing ? (
         <form onSubmit={submit} className="animate-rise space-y-3 rounded-3xl border border-line bg-card p-5">
-          {others.length > 1 && (
+          {editing && <p className={fieldLabel}>Editing your letter to {name}</p>}
+          {others.length > 1 && !editing && (
             <div className="flex flex-wrap gap-2">
               {others.map((p) => (
                 <Chip key={p.id} on={to === p.id} onClick={() => setTo(p.id)}>
@@ -162,59 +204,98 @@ function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]
               ))}
             </div>
           )}
-          <input
-            autoFocus
-            required
-            maxLength={60}
-            placeholder="On the envelope, e.g. Open when you land"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            aria-label="On the envelope"
-            className={input}
-          />
-          <textarea
-            required
-            maxLength={4000}
-            rows={7}
-            placeholder={`Dear ${name},`}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            aria-label="Letter"
-            className={`${input} resize-y font-serif text-lg leading-7`}
-          />
-          <div>
-            <span className={fieldLabel}>{name} can open it</span>
-            <div className="flex flex-wrap gap-2">
-              <Chip on={!timed} onClick={() => setTimed(false)}>
-                Right away
-              </Chip>
-              <Chip on={timed} onClick={() => setTimed(true)}>
-                From a time
-              </Chip>
+          {previewing ? (
+            <div className="space-y-2">
+              <p className="px-1 text-xs text-muted">
+                {timed && when
+                  ? `This is how ${name} will see it from ${clock(new Date(when).getTime(), now)}. Until then it's a locked envelope.`
+                  : `This is how ${name} will see it. Tap it to open.`}
+              </p>
+              <Envelope
+                preview
+                now={now}
+                letter={{
+                  id: "preview",
+                  title: title.trim(),
+                  body: body.trim(),
+                  opensAt: null,
+                  openedAt: null,
+                  fromName: me.name,
+                  toId: to,
+                  toName: name,
+                  createdAt: now,
+                }}
+              />
             </div>
-          </div>
-          {timed && (
+          ) : (
+            <>
             <input
+              autoFocus
               required
-              type="datetime-local"
-              value={when}
-              onChange={(e) => setWhen(e.target.value)}
-              aria-label="Opens at"
-              className={`${input} block min-h-12 min-w-0 appearance-none text-left [&::-webkit-date-and-time-value]:text-left`}
+              maxLength={60}
+              placeholder="On the envelope, e.g. Open when you land"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              aria-label="On the envelope"
+              className={input}
             />
+            <textarea
+              required
+              maxLength={4000}
+              rows={7}
+              placeholder={`Dear ${name},`}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              aria-label="Letter"
+              className={`${input} resize-y font-serif text-lg leading-7`}
+            />
+            <div>
+              <span className={fieldLabel}>{name} can open it</span>
+              <div className="flex flex-wrap gap-2">
+                <Chip on={!timed} onClick={() => setTimed(false)}>
+                  Right away
+                </Chip>
+                <Chip on={timed} onClick={() => setTimed(true)}>
+                  From a time
+                </Chip>
+              </div>
+            </div>
+            {timed && (
+              <input
+                required
+                type="datetime-local"
+                value={when}
+                onChange={(e) => setWhen(e.target.value)}
+                aria-label="Opens at"
+                className={`${input} block min-h-12 min-w-0 appearance-none text-left [&::-webkit-date-and-time-value]:text-left`}
+              />
+            )}
+            <p className="px-1 text-xs text-muted">
+              {timed
+                ? `${name} sees a sealed envelope now, and gets a notification when it unlocks.`
+                : `${name} gets a notification straight away.`}
+            </p>
+            </>
           )}
-          <p className="px-1 text-xs text-muted">
-            {timed
-              ? `${name} sees a sealed envelope now, and gets a notification when it unlocks.`
-              : `${name} gets a notification straight away.`}
-          </p>
+          <button
+            type="button"
+            onClick={() => setPreviewing(!previewing)}
+            disabled={!previewing && (!title.trim() || !body.trim())}
+            className="w-full rounded-xl py-2 text-sm font-medium text-accent transition-opacity disabled:opacity-40"
+          >
+            {previewing ? "✏️ Keep editing" : "👀 Preview"}
+          </button>
           {error && <p className="animate-rise text-sm text-red-500">{error}</p>}
           <div className="flex gap-2">
-            <button type="button" onClick={() => setWriting(false)} className={`${secondaryButton} flex-1`}>
+            <button
+              type="button"
+              onClick={close}
+              className={`${secondaryButton} flex-1`}
+            >
               Cancel
             </button>
             <button disabled={saving} className={`${primaryButton} flex-[2]`}>
-              {saving ? "Sealing…" : "Seal it 💌"}
+              {saving ? "Saving…" : editing ? "Save changes" : "Seal it 💌"}
             </button>
           </div>
         </form>
@@ -230,7 +311,7 @@ function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]
       {sent.length > 0 && (
         <ul className="space-y-1.5">
           {sent.map((letter) => (
-            <SentLetter key={letter.id} letter={letter} now={now} onChange={onChange} />
+            <SentLetter key={letter.id} letter={letter} now={now} onEdit={() => edit(letter)} onChange={onChange} />
           ))}
         </ul>
       )}
@@ -238,7 +319,17 @@ function Write({ others, sent, now, onChange }: { others: User[]; sent: Letter[]
   );
 }
 
-function SentLetter({ letter, now, onChange }: { letter: Letter; now: number; onChange: () => void }) {
+function SentLetter({
+  letter,
+  now,
+  onEdit,
+  onChange,
+}: {
+  letter: Letter;
+  now: number;
+  onEdit: () => void;
+  onChange: () => void;
+}) {
   const [confirming, setConfirming] = useState(false);
 
   async function remove() {
@@ -264,6 +355,17 @@ function SentLetter({ letter, now, onChange }: { letter: Letter; now: number; on
           To {letter.toName} · {status}
         </span>
       </span>
+      {!confirming && (
+        <button
+          onClick={() => {
+            onEdit();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+          className="shrink-0 rounded-full px-2 py-2 text-xs font-medium text-accent"
+        >
+          Edit
+        </button>
+      )}
       <button
         onClick={remove}
         onBlur={() => setConfirming(false)}
@@ -276,6 +378,13 @@ function SentLetter({ letter, now, onChange }: { letter: Letter; now: number; on
       </button>
     </li>
   );
+}
+
+/** `ms` as a datetime-local value in this phone's time, e.g. "2026-11-25T18:40". */
+function localInput(ms: number) {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** "6:40 PM" today, otherwise "Wed, Nov 26, 6:40 PM". */

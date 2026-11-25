@@ -10,6 +10,7 @@ export type Letter = {
   opensAt: number | null;
   openedAt: number | null;
   fromName: string | null;
+  toId: string;
   toName: string;
   createdAt: number;
 };
@@ -21,11 +22,12 @@ type Row = {
   opens_at: number | null;
   opened_at: number | null;
   from_name: string | null;
+  to_user: string;
   to_name: string;
   created_at: number;
 };
 
-const SELECT = `SELECT l.id, l.title, l.body, l.opens_at, l.opened_at, f.name AS from_name, t.name AS to_name, l.created_at
+const SELECT = `SELECT l.id, l.title, l.body, l.opens_at, l.opened_at, f.name AS from_name, l.to_user, t.name AS to_name, l.created_at
   FROM letters l JOIN users t ON t.id = l.to_user LEFT JOIN users f ON f.id = l.from_user`;
 
 function toLetter(r: Row, now: number, sealed: boolean): Letter {
@@ -37,6 +39,7 @@ function toLetter(r: Row, now: number, sealed: boolean): Letter {
     opensAt: r.opens_at,
     openedAt: r.opened_at,
     fromName: r.from_name,
+    toId: r.to_user,
     toName: r.to_name,
     createdAt: r.created_at,
   };
@@ -63,6 +66,27 @@ export function addLetter(from: string, to: string, title: string, body: string,
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, to, from, title, body, opensAt, announced, now);
   return id;
+}
+
+/**
+ * Rewrites a letter `userId` wrote. Returns who it's to, and whether to tell them it can be
+ * opened now (it was sealed and isn't any more); null when it isn't theirs.
+ */
+export function updateLetter(id: string, userId: string, title: string, body: string, opensAt: number | null, now = Date.now()) {
+  const row = db().prepare("SELECT to_user, announced FROM letters WHERE id = ? AND from_user = ?").get(id, userId) as
+    | { to_user: string; announced: number }
+    | undefined;
+  if (!row) return null;
+  const locked = opensAt !== null && opensAt > now;
+  // A letter sealed again is announced when it unlocks.
+  db().prepare("UPDATE letters SET title = ?, body = ?, opens_at = ?, announced = ? WHERE id = ?").run(
+    title,
+    body,
+    locked ? opensAt : null,
+    locked ? 0 : 1,
+    id,
+  );
+  return { to: row.to_user, announce: !locked && row.announced === 0 };
 }
 
 /**
