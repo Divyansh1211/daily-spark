@@ -94,6 +94,27 @@ function open() {
       opened_at INTEGER,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS flights (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL,            -- flight number without spaces, e.g. EY211 (IATA) or ETD211 (ICAO)
+      added_by TEXT REFERENCES users (id) ON DELETE SET NULL,
+      phase TEXT NOT NULL DEFAULT 'scheduled', -- scheduled, airborne, landed
+      info TEXT,                     -- JSON: what AirLabs last said about it
+      error TEXT,                    -- why the last check failed, if it did
+      delay_told INTEGER NOT NULL DEFAULT 0, -- departure delay (minutes) people were last told about
+      checked_at INTEGER,
+      landed_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS airports (
+      iata TEXT PRIMARY KEY,
+      name TEXT,
+      city TEXT,
+      lat REAL,
+      lng REAL,
+      tz TEXT,                       -- IANA time zone, e.g. Asia/Dubai
+      fetched_at INTEGER NOT NULL
+    );
   `);
   return db;
 }

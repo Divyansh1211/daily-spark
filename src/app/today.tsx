@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Daily } from "@/lib/daily";
 import { CheckIcon, FlameIcon, ImageIcon, ShareIcon, ShuffleIcon } from "./icons";
+import { Flights } from "./flights";
 import { Letters } from "./letters";
 import { photoUrl, usePhotoOfTheDay } from "./use-photos";
 
@@ -76,6 +77,7 @@ export function Today() {
         </span>
       </div>
 
+      <Flights />
       <Letters />
 
       {/* Quote of the day */}

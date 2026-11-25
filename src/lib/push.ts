@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import webpush, { type PushSubscription as WebPushSubscription, WebPushError } from "web-push";
 import { listPeople, type User } from "./auth";
 import { getDaily } from "./daily";
+import { checkFlights } from "./flights";
 import { takeUnlockedLetters } from "./letters";
 import { store, type Reminder } from "./store";
 
@@ -138,6 +139,28 @@ export async function sendUnlockedLetters(now = Date.now()) {
     ),
   );
   return { unlocked: letters.length };
+}
+
+/** Checks the flights being watched and tells everyone when one takes off, lands or gets delayed. */
+export async function sendFlightUpdates(now = Date.now()) {
+  const changes = await checkFlights(now);
+  const everyone = listPeople().map((p) => p.id);
+  await Promise.all(
+    changes.map((c) => {
+      const f = c.flight;
+      const from = f.from?.city ?? f.from?.code;
+      const to = f.to?.city ?? f.to?.code;
+      const body =
+        c.kind === "took-off"
+          ? `✈️ ${f.code} just took off${from ? ` from ${from}` : ""}${to ? `, heading to ${to}` : ""}`
+          : c.kind === "landed"
+            ? `🛬 ${f.code} has landed${to ? ` in ${to}` : ""}`
+            : `⏰ ${f.code}${from ? ` from ${from}` : ""} is running about ${"minutes" in c ? c.minutes : 0} min late`;
+      // One notification per flight, replaced as it goes from delayed to in the air to landed.
+      return notifyUsers(everyone, { title: "Space", body, tag: `flight-${f.id}` });
+    }),
+  );
+  return { flights: changes.length };
 }
 
 /** Sends every reminder that is due and reschedules or removes it. */
