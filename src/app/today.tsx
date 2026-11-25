@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Daily } from "@/lib/daily";
 import { CheckIcon, FlameIcon, ImageIcon, ShareIcon, ShuffleIcon } from "./icons";
+import { Letters } from "./letters";
 import { photoUrl, usePhotoOfTheDay } from "./use-photos";
 
 /** The user's local calendar date as YYYY-MM-DD. */
@@ -74,6 +75,8 @@ export function Today() {
           {date.toLocaleDateString(undefined, { month: "long", day: "numeric" })}
         </span>
       </div>
+
+      <Letters />
 
       {/* Quote of the day */}
       <section className="relative overflow-hidden rounded-3xl bg-hero p-6 text-hero-fg">

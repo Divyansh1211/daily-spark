@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import webpush, { type PushSubscription as WebPushSubscription, WebPushError } from "web-push";
 import { listPeople, type User } from "./auth";
 import { getDaily } from "./daily";
+import { takeUnlockedLetters } from "./letters";
 import { store, type Reminder } from "./store";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,7 +42,8 @@ export async function sendPush(deviceId: string, payload: PushPayload) {
   if (!sub) return false;
   try {
     await webpush.sendNotification(sub as WebPushSubscription, JSON.stringify(payload), {
-      TTL: 60 * 60,
+      // Kept for a day, so a phone that's offline for a while (say, on a flight) still gets it.
+      TTL: 24 * 60 * 60,
     });
     return true;
   } catch (error) {
@@ -106,6 +108,36 @@ export function sendPhotoPush(from: User, photoId: string) {
     // Uploading several at once shows one notification rather than a pile of them.
     tag: `photo-${from.id}`,
   });
+}
+
+/** Tells `to` that `from` wrote them a letter, which may stay locked until later. */
+export function sendLetterPush(from: User, to: string, letterId: string, title: string, locked: boolean) {
+  return notifyUsers([to], {
+    title: "Space",
+    body: locked ? `${from.name} left you a sealed letter: “${title}” 🔒` : `${from.name} wrote you a letter: “${title}” 💌`,
+    tag: `letter-${letterId}`,
+  });
+}
+
+/** Tells whoever wrote a letter that `by` opened it. */
+export function sendLetterOpenedPush(by: User, to: string, letterId: string, title: string) {
+  return notifyUsers([to], { title: "Space", body: `${by.name} opened “${title}” 💌`, tag: `letter-opened-${letterId}` });
+}
+
+/** Tells people when a letter that was locked until now can be opened. */
+export async function sendUnlockedLetters(now = Date.now()) {
+  const letters = takeUnlockedLetters(now);
+  await Promise.all(
+    letters.map((l) =>
+      notifyUsers([l.to_user], {
+        title: "Space",
+        body: `A letter${l.from_name ? ` from ${l.from_name}` : ""} is ready to open: “${l.title}” 💌`,
+        // Replaces the "sealed letter" notification, if it's still showing.
+        tag: `letter-${l.id}`,
+      }),
+    ),
+  );
+  return { unlocked: letters.length };
 }
 
 /** Sends every reminder that is due and reschedules or removes it. */

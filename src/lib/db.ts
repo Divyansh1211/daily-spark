@@ -83,6 +83,17 @@ function open() {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS letters (
+      id TEXT PRIMARY KEY,
+      to_user TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      from_user TEXT REFERENCES users (id) ON DELETE SET NULL,
+      title TEXT NOT NULL,           -- what the envelope says, e.g. "Open when you land"
+      body TEXT NOT NULL,
+      opens_at INTEGER,              -- ms; null when it can be opened straight away
+      announced INTEGER NOT NULL DEFAULT 0, -- 1 once the recipient was told they can open it
+      opened_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
   `);
   return db;
 }
