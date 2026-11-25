@@ -27,8 +27,8 @@ type Row = {
   created_at: number;
 };
 
-const SELECT = `SELECT l.id, l.title, l.body, l.opens_at, l.opened_at, f.name AS from_name, l.to_user, t.name AS to_name, l.created_at
-  FROM letters l JOIN users t ON t.id = l.to_user LEFT JOIN users f ON f.id = l.from_user`;
+const SELECT = `SELECT l.id, l.title, l.body, l.opens_at, l.opened_at, f.name AS from_name, l.to_user, t.name AS to_name, l.created_at`;
+const JOINS = `JOIN users t ON t.id = l.to_user LEFT JOIN users f ON f.id = l.from_user`;
 
 function toLetter(r: Row, now: number, sealed: boolean): Letter {
   const locked = sealed && r.opens_at !== null && r.opens_at > now;
@@ -45,14 +45,27 @@ function toLetter(r: Row, now: number, sealed: boolean): Letter {
   };
 }
 
-/** Letters `userId` was sent (locked ones without their words) and letters they wrote, newest first. */
+/**
+ * Letters `userId` was sent (locked ones without their words) and letters they wrote, newest first,
+ * with the ones they've archived kept apart. Archiving only tidies away your own copy.
+ */
 export function listLetters(userId: string, now = Date.now()) {
-  const received = db().prepare(`${SELECT} WHERE l.to_user = ? ORDER BY l.created_at DESC`).all(userId) as Row[];
-  const sent = db().prepare(`${SELECT} WHERE l.from_user = ? ORDER BY l.created_at DESC`).all(userId) as Row[];
+  const received = db()
+    .prepare(`${SELECT}, l.to_archived AS archived FROM letters l ${JOINS} WHERE l.to_user = ? ORDER BY l.created_at DESC`)
+    .all(userId) as (Row & { archived: number })[];
+  const sent = db()
+    .prepare(`${SELECT}, l.from_archived AS archived FROM letters l ${JOINS} WHERE l.from_user = ? ORDER BY l.created_at DESC`)
+    .all(userId) as (Row & { archived: number })[];
+  const toReceived = (r: Row) => toLetter(r, now, true);
+  // The writer can always reread their own.
+  const toSent = (r: Row) => toLetter(r, now, false);
   return {
-    received: received.map((r) => toLetter(r, now, true)),
-    // The writer can always reread their own.
-    sent: sent.map((r) => toLetter(r, now, false)),
+    received: received.filter((r) => !r.archived).map(toReceived),
+    sent: sent.filter((r) => !r.archived).map(toSent),
+    archived: {
+      received: received.filter((r) => r.archived).map(toReceived),
+      sent: sent.filter((r) => r.archived).map(toSent),
+    },
   };
 }
 
@@ -102,9 +115,14 @@ export function markOpened(id: string, userId: string, now = Date.now()) {
   return row.from_user ? { from: row.from_user, title: row.title } : null;
 }
 
-/** Only whoever wrote a letter can take it back. */
-export function deleteLetter(id: string, userId: string) {
-  db().prepare("DELETE FROM letters WHERE id = ? AND from_user = ?").run(id, userId);
+/**
+ * Puts a letter away (or brings it back) for `userId` only: the other person's copy stays where it is.
+ * A letter you were sent can only be archived once you've opened it, so none goes unread.
+ */
+export function archiveLetter(id: string, userId: string, archived: boolean) {
+  const flag = archived ? 1 : 0;
+  db().prepare("UPDATE letters SET from_archived = ? WHERE id = ? AND from_user = ?").run(flag, id, userId);
+  db().prepare("UPDATE letters SET to_archived = ? WHERE id = ? AND to_user = ? AND (? = 0 OR opened_at IS NOT NULL)").run(flag, id, userId, flag);
 }
 
 /** Timed letters that have just unlocked, marked as announced so each is only announced once. */

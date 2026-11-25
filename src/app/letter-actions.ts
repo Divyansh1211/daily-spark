@@ -2,11 +2,19 @@
 
 import { after } from "next/server";
 import { currentUser, listPeople, type User } from "@/lib/auth";
-import { addLetter, deleteLetter, listLetters, markOpened, updateLetter, type Letter } from "@/lib/letters";
+import { addLetter, archiveLetter, listLetters, markOpened, updateLetter, type Letter } from "@/lib/letters";
 import { sendLetterOpenedPush, sendLetterPush } from "@/lib/push";
 
 export async function loadLetters(): Promise<
-  { status: "locked" } | { status: "ready"; received: Letter[]; sent: Letter[]; others: User[]; me: User }
+  | { status: "locked" }
+  | {
+      status: "ready";
+      received: Letter[];
+      sent: Letter[];
+      archived: { received: Letter[]; sent: Letter[] };
+      others: User[];
+      me: User;
+    }
 > {
   const user = await currentUser();
   if (!user) return { status: "locked" };
@@ -62,9 +70,10 @@ export async function openLetterAction(id: string) {
   return { ok: true };
 }
 
-export async function deleteLetterAction(id: string) {
+/** Moves a letter to (or back out of) your archive. Letters are never deleted. */
+export async function archiveLetterAction(id: string, archived: boolean) {
   const user = await currentUser();
   if (!user || typeof id !== "string") return { ok: false };
-  deleteLetter(id, user.id);
+  archiveLetter(id, user.id, archived === true);
   return { ok: true };
 }

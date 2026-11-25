@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { User } from "@/lib/auth";
 import type { Letter } from "@/lib/letters";
-import { CheckIcon, LockIcon, TrashIcon } from "./icons";
-import { deleteLetterAction, editLetterAction, loadLetters, openLetterAction, writeLetterAction } from "./letter-actions";
+import { ArchiveIcon, CheckIcon, LockIcon } from "./icons";
+import { archiveLetterAction, editLetterAction, loadLetters, openLetterAction, writeLetterAction } from "./letter-actions";
 
 type State =
   | { status: "loading" }
-  | { status: "ready"; received: Letter[]; sent: Letter[]; others: User[]; me: User };
+  | {
+      status: "ready";
+      received: Letter[];
+      sent: Letter[];
+      archived: { received: Letter[]; sent: Letter[] };
+      others: User[];
+      me: User;
+    };
 
 /** Letters for you, and the ones you've written, on the Today tab. Hidden until there's someone to write to. */
 export function Letters() {
@@ -55,16 +62,43 @@ export function Letters() {
   return (
     <div className="animate-rise space-y-3">
       {state.received.map((letter) => (
-        <Envelope key={letter.id} letter={letter} now={now} />
+        <Envelope key={letter.id} letter={letter} now={now} onArchive={refresh} />
       ))}
       <Write me={state.me} others={state.others} sent={state.sent} now={now} onChange={refresh} />
+      <Archive archived={state.archived} now={now} onChange={refresh} />
     </div>
   );
 }
 
-/** `preview` shows a letter that hasn't been sent yet, so opening it doesn't tell anyone. */
-function Envelope({ letter, now, preview = false }: { letter: Letter; now: number; preview?: boolean }) {
+/**
+ * `preview` shows a letter that hasn't been sent yet, so opening it doesn't tell anyone.
+ * `onArchive` offers to put it away once it's been read; `archived` offers to bring it back.
+ */
+function Envelope({
+  letter,
+  now,
+  preview = false,
+  archived = false,
+  onArchive,
+}: {
+  letter: Letter;
+  now: number;
+  preview?: boolean;
+  archived?: boolean;
+  onArchive?: () => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [moving, setMoving] = useState(false);
+
+  async function archive() {
+    setMoving(true);
+    try {
+      await archiveLetterAction(letter.id, !archived);
+      onArchive?.();
+    } finally {
+      setMoving(false);
+    }
+  }
   const locked = letter.body === null;
   const unread = !locked && letter.openedAt === null && !open;
 
@@ -114,6 +148,16 @@ function Envelope({ letter, now, preview = false }: { letter: Letter; now: numbe
         <div className="animate-rise border-t border-line px-6 pt-5 pb-6">
           <p className="whitespace-pre-wrap font-serif text-lg leading-8">{letter.body}</p>
           {letter.fromName && <p className="mt-4 text-right font-serif text-lg italic text-muted">— {letter.fromName}</p>}
+          {onArchive && !preview && (
+            <button
+              type="button"
+              onClick={archive}
+              disabled={moving}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-full px-1 py-1 text-xs font-medium text-muted transition-opacity disabled:opacity-50"
+            >
+              <ArchiveIcon /> {archived ? "Move back out of the archive" : "Archive it"}
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -319,23 +363,30 @@ function Write({
   );
 }
 
+/** A letter you wrote. `onEdit` is left out for one in the archive, which can only be moved back. */
 function SentLetter({
   letter,
   now,
+  archived = false,
   onEdit,
   onChange,
 }: {
   letter: Letter;
   now: number;
-  onEdit: () => void;
+  archived?: boolean;
+  onEdit?: () => void;
   onChange: () => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
+  const [moving, setMoving] = useState(false);
 
-  async function remove() {
-    if (!confirming) return setConfirming(true);
-    await deleteLetterAction(letter.id);
-    onChange();
+  async function archive() {
+    setMoving(true);
+    try {
+      await archiveLetterAction(letter.id, !archived);
+      onChange();
+    } finally {
+      setMoving(false);
+    }
   }
 
   const status =
@@ -355,7 +406,7 @@ function SentLetter({
           To {letter.toName} · {status}
         </span>
       </span>
-      {!confirming && (
+      {onEdit && (
         <button
           onClick={() => {
             onEdit();
@@ -367,16 +418,67 @@ function SentLetter({
         </button>
       )}
       <button
-        onClick={remove}
-        onBlur={() => setConfirming(false)}
-        aria-label="Take back this letter"
-        className={`shrink-0 rounded-full p-2 text-sm transition-colors ${
-          confirming ? "bg-red-500 px-3 font-medium text-white" : "text-muted"
-        }`}
+        onClick={archive}
+        disabled={moving}
+        aria-label={archived ? "Move back out of the archive" : "Archive this letter"}
+        title={archived ? "Move back out of the archive" : "Archive"}
+        className="shrink-0 rounded-full p-2 text-xs font-medium text-muted transition-opacity disabled:opacity-50"
       >
-        {confirming ? "Delete?" : <TrashIcon />}
+        {archived ? "Restore" : <ArchiveIcon className="text-sm" />}
       </button>
     </li>
+  );
+}
+
+/**
+ * Letters put away, folded up at the bottom. Archiving only hides your own copy,
+ * so nothing is lost and the other person's stays where it was.
+ */
+function Archive({
+  archived,
+  now,
+  onChange,
+}: {
+  archived: { received: Letter[]; sent: Letter[] };
+  now: number;
+  onChange: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = archived.received.length + archived.sent.length;
+  if (count === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl py-2 text-sm font-medium text-muted"
+      >
+        <ArchiveIcon /> {open ? "Hide the archive" : `Archive · ${count} ${count === 1 ? "letter" : "letters"}`}
+      </button>
+      {open && (
+        <div className="animate-rise space-y-3">
+          {archived.received.length > 0 && (
+            <div className="space-y-2">
+              <p className={fieldLabel}>Letters to you</p>
+              {archived.received.map((letter) => (
+                <Envelope key={letter.id} letter={letter} now={now} archived onArchive={onChange} />
+              ))}
+            </div>
+          )}
+          {archived.sent.length > 0 && (
+            <div className="space-y-2">
+              <p className={fieldLabel}>Letters you wrote</p>
+              <ul className="space-y-1.5">
+                {archived.sent.map((letter) => (
+                  <SentLetter key={letter.id} letter={letter} now={now} archived onChange={onChange} />
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -92,6 +92,8 @@ function open() {
       opens_at INTEGER,              -- ms; null when it can be opened straight away
       announced INTEGER NOT NULL DEFAULT 0, -- 1 once the recipient was told they can open it
       opened_at INTEGER,
+      to_archived INTEGER NOT NULL DEFAULT 0,   -- 1 once the recipient put it away; letters are archived, never deleted
+      from_archived INTEGER NOT NULL DEFAULT 0, -- the same, for whoever wrote it
       created_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS flights (
@@ -121,6 +123,8 @@ function open() {
   const has = (table: string, column: string) =>
     (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
   if (!has("flights", "ref")) db.exec("ALTER TABLE flights ADD COLUMN ref TEXT");
+  if (!has("letters", "to_archived")) db.exec("ALTER TABLE letters ADD COLUMN to_archived INTEGER NOT NULL DEFAULT 0");
+  if (!has("letters", "from_archived")) db.exec("ALTER TABLE letters ADD COLUMN from_archived INTEGER NOT NULL DEFAULT 0");
   return db;
 }
 
