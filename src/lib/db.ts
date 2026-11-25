@@ -97,6 +97,7 @@ function open() {
     CREATE TABLE IF NOT EXISTS flights (
       id TEXT PRIMARY KEY,
       code TEXT NOT NULL,            -- flight number without spaces, e.g. EY211 (IATA) or ETD211 (ICAO)
+      ref TEXT,                      -- the flight service's own id for this one flight, once found
       added_by TEXT REFERENCES users (id) ON DELETE SET NULL,
       phase TEXT NOT NULL DEFAULT 'scheduled', -- scheduled, airborne, landed
       info TEXT,                     -- JSON: what AirLabs last said about it
@@ -116,6 +117,10 @@ function open() {
       fetched_at INTEGER NOT NULL
     );
   `);
+  // Columns added after their table first shipped.
+  const has = (table: string, column: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+  if (!has("flights", "ref")) db.exec("ALTER TABLE flights ADD COLUMN ref TEXT");
   return db;
 }
 

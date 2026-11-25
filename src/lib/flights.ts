@@ -2,19 +2,26 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { db } from "./db";
 
-// Flight status from AirLabs (https://airlabs.co/docs/flight), which takes a flight number and
-// returns the nearest live, scheduled or landed flight with it. Needs AIRLABS_API_KEY; the free
-// plan allows about 1,000 calls a month, so flights are checked on a schedule (see `checkEvery`)
-// rather than whenever someone opens the app.
-// Overridable so it can be pointed at a stand-in when testing.
-const API = process.env.AIRLABS_API_URL ?? "https://airlabs.co/api/v9";
+// Flight status from FlightAware AeroAPI (FLIGHTAWARE_API_KEY), or AirLabs (AIRLABS_API_KEY) when
+// that's all there is. Both charge per call past a small free allowance, so flights are checked on
+// a schedule (see `checkEvery`) rather than whenever someone opens the app.
+//
+// FlightAware gives each flight its own id, which is kept once found, so a flight is followed
+// from gate to gate. AirLabs only takes a flight number and answers with the nearest flight with
+// it, so its "landed" has to be worked out (see `phaseFrom`).
+// The URLs are overridable so they can be pointed at a stand-in when testing.
+const FLIGHTAWARE = process.env.FLIGHTAWARE_API_URL ?? "https://aeroapi.flightaware.com/aeroapi";
+const AIRLABS = process.env.AIRLABS_API_URL ?? "https://airlabs.co/api/v9";
 const MAX_FLIGHTS = 4;
 
 export type Phase = "scheduled" | "airborne" | "landed";
 
-/** What AirLabs said about a flight. Anything can be missing, depending on the flight and the plan. */
+/** What the flight service said about a flight. Anything can be missing, depending on the flight and the plan. */
 export type FlightInfo = {
-  status?: string; // scheduled, en-route, landed, …
+  status?: string; // scheduled, en-route, landed, cancelled
+  /** Set when this is known to be the very flight being followed, not just one with its number. */
+  pinned?: boolean;
+  progress?: number; // 0–100, from the service
   dep?: string; // airport IATA codes
   arr?: string;
   depLocal?: string; // "2026-11-25 18:50", at the airport
@@ -76,23 +83,140 @@ function display(code: string) {
 }
 
 export function trackingEnabled() {
-  return Boolean(process.env.AIRLABS_API_KEY);
+  return Boolean(process.env.FLIGHTAWARE_API_KEY || process.env.AIRLABS_API_KEY);
 }
 
-async function call(path: string, params: Record<string, string>): Promise<unknown> {
-  const key = process.env.AIRLABS_API_KEY;
-  if (!key) throw new FlightError("Flight tracking isn't set up on the server yet.");
-  const url = new URL(`${API}/${path}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  url.searchParams.set("api_key", key);
+/** Looks a flight up; `ref` is the service's own id for it, once known. */
+async function lookup(code: string, ref: string | null): Promise<{ info: FlightInfo; ref: string | null }> {
+  if (process.env.FLIGHTAWARE_API_KEY) return flightAware(code, ref);
+  if (process.env.AIRLABS_API_KEY) return { info: await airLabs(code), ref: null };
+  throw new FlightError("Flight tracking isn't set up on the server yet.");
+}
+
+async function getJson(url: URL, headers: Record<string, string>) {
   let res: Response;
   try {
-    res = await fetch(url, { signal: AbortSignal.timeout(10_000), cache: "no-store" });
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000), cache: "no-store" });
   } catch {
     throw new FlightError("Couldn't reach the flight service.");
   }
-  const json = (await res.json().catch(() => null)) as { error?: { message?: string }; response?: unknown } | null;
-  if (json?.error) throw new FlightError(String(json.error.message ?? "The flight service said no.").slice(0, 160));
+  return { res, json: (await res.json().catch(() => null)) as Record<string, unknown> | null };
+}
+
+// --- FlightAware AeroAPI (https://www.flightaware.com/aeroapi/portal/documentation) ---
+
+async function faCall(path: string, params: Record<string, string> = {}) {
+  const url = new URL(`${FLIGHTAWARE}${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const { res, json } = await getJson(url, { "x-apikey": process.env.FLIGHTAWARE_API_KEY! });
+  if (res.status === 400 || res.status === 404) return null;
+  if (!res.ok || !json) {
+    const detail = str(json?.detail) ?? str(json?.title);
+    throw new FlightError((detail ? `The flight service said: ${detail}` : `The flight service answered ${res.status}.`).slice(0, 160));
+  }
+  return json;
+}
+
+type FaFlight = Record<string, unknown> & { fa_flight_id?: string };
+
+const at = (v: unknown) => {
+  const t = typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(t) ? t : undefined;
+};
+
+/** Of the flights with a number (about two weeks of them), the one to follow: in the air, else the next to leave. */
+function pick(flights: FaFlight[], now: number) {
+  const leaves = (f: FaFlight) => at(f.scheduled_out) ?? at(f.scheduled_off) ?? 0;
+  const flying = flights.find((f) => f.actual_off && !f.actual_on && !f.cancelled);
+  if (flying) return flying;
+  const upcoming = flights
+    .filter((f) => !f.actual_on && !f.cancelled && leaves(f) > now - 6 * 3_600_000)
+    .sort((a, b) => leaves(a) - leaves(b));
+  // Otherwise the latest one, which is first, as they come newest first.
+  return upcoming[0] ?? flights[0];
+}
+
+function saveAirport(a: unknown) {
+  if (!a || typeof a !== "object") return undefined;
+  const r = a as Record<string, unknown>;
+  const code = str(r.code_iata) ?? str(r.code);
+  if (!code) return undefined;
+  const tz = str(r.timezone);
+  db().prepare(
+    `INSERT INTO airports (iata, name, city, tz, fetched_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (iata) DO UPDATE SET name = excluded.name, city = excluded.city, tz = COALESCE(excluded.tz, tz), fetched_at = excluded.fetched_at`,
+  ).run(code, str(r.name) ?? null, str(r.city) ?? null, tz && isZone(tz) ? tz : null, Date.now());
+  return code;
+}
+
+async function flightAware(code: string, ref: string | null): Promise<{ info: FlightInfo; ref: string | null }> {
+  const parsed = parseFlightCode(code);
+  if (!parsed) throw new FlightError("That doesn't look like a flight number.");
+  const found = ref
+    ? await faCall(`/flights/${encodeURIComponent(ref)}`, { ident_type: "fa_flight_id" })
+    : await faCall(`/flights/${encodeURIComponent(parsed.code)}`, { ident_type: "designator" });
+  const flights = (Array.isArray(found?.flights) ? found.flights : []) as FaFlight[];
+  const f = ref ? flights.find((x) => !x.diverted) ?? flights[0] : pick(flights, Date.now());
+  if (!f) throw new FlightError(`Couldn't find ${display(parsed.code)}. Check the number, or try again closer to the day.`);
+
+  const dep = saveAirport(f.origin);
+  const arr = saveAirport(f.destination);
+  // A diverted flight still takes off and lands, just somewhere else, so it's followed the same way.
+  const status = f.actual_on || f.actual_in ? "landed" : f.actual_off ? "en-route" : f.cancelled ? "cancelled" : "scheduled";
+  const secondsToMinutes = (v: unknown) => (num(v) !== undefined ? Math.round(num(v)! / 60) : undefined);
+  const info: FlightInfo = {
+    status,
+    pinned: true,
+    progress: num(f.progress_percent),
+    dep,
+    arr,
+    depAt: at(f.scheduled_out) ?? at(f.scheduled_off),
+    arrAt: at(f.scheduled_in) ?? at(f.scheduled_on),
+    depEstAt: at(f.actual_out) ?? at(f.estimated_out) ?? at(f.actual_off) ?? at(f.estimated_off),
+    arrEstAt: at(f.actual_in) ?? at(f.estimated_in) ?? at(f.actual_on) ?? at(f.estimated_on),
+    depDelay: secondsToMinutes(f.departure_delay),
+    arrDelay: secondsToMinutes(f.arrival_delay),
+    depTerminal: str(f.terminal_origin),
+    depGate: str(f.gate_origin),
+    arrTerminal: str(f.terminal_destination),
+    arrGate: str(f.gate_destination),
+    baggage: str(f.baggage_claim),
+    aircraft: str(f.aircraft_type),
+  };
+  // Where it is, only while it's flying, as it's another call.
+  if (status === "en-route" && f.fa_flight_id) {
+    try {
+      const position = await faCall(`/flights/${encodeURIComponent(f.fa_flight_id)}/position`);
+      const p = (position?.last_position ?? null) as Record<string, unknown> | null;
+      if (p) {
+        info.lat = num(p.latitude);
+        info.lng = num(p.longitude);
+        // Hundreds of feet and knots, kept as metres and km/h like the rest.
+        if (num(p.altitude) !== undefined) info.alt = num(p.altitude)! * 100 * 0.3048;
+        if (num(p.groundspeed) !== undefined) info.speed = num(p.groundspeed)! * 1.852;
+        info.dir = num(p.heading);
+        info.seenAt = at(p.timestamp);
+      }
+    } catch (error) {
+      console.error("[flights] position", error instanceof Error ? error.message : error);
+    }
+  }
+  return { info: clean(info), ref: str(f.fa_flight_id) ?? ref };
+}
+
+function clean(info: FlightInfo) {
+  return Object.fromEntries(Object.entries(info).filter(([, v]) => v !== undefined)) as FlightInfo;
+}
+
+// --- AirLabs (https://airlabs.co/docs/flight) ---
+
+async function call(path: string, params: Record<string, string>): Promise<unknown> {
+  const url = new URL(`${AIRLABS}/${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  url.searchParams.set("api_key", process.env.AIRLABS_API_KEY!);
+  const { res, json } = await getJson(url, {});
+  const error = json?.error as { message?: string } | undefined;
+  if (error) throw new FlightError(String(error.message ?? "The flight service said no.").slice(0, 160));
   if (!res.ok || !json) throw new FlightError(`The flight service answered ${res.status}.`);
   return json.response;
 }
@@ -130,18 +254,20 @@ function toInfo(r: Record<string, unknown>): FlightInfo {
     seenAt: ms(r.updated),
     aircraft: str(r.model) ?? str(r.aircraft_icao),
   };
-  return Object.fromEntries(Object.entries(info).filter(([, v]) => v !== undefined)) as FlightInfo;
+  return clean(info);
 }
 
 /** Asks AirLabs about a flight number. */
-async function lookup(code: string): Promise<FlightInfo> {
+async function airLabs(code: string): Promise<FlightInfo> {
   const parsed = parseFlightCode(code);
   if (!parsed) throw new FlightError("That doesn't look like a flight number.");
   const response = await call("flight", { [parsed.param]: parsed.code });
   if (!response || typeof response !== "object" || Array.isArray(response) || Object.keys(response).length === 0) {
     throw new FlightError(`Couldn't find ${display(parsed.code)}. Check the number, or try again closer to the day.`);
   }
-  return toInfo(response as Record<string, unknown>);
+  const info = toInfo(response as Record<string, unknown>);
+  await Promise.all([airport(info.dep), airport(info.arr)]);
+  return info;
 }
 
 /** An airport's name, place and time zone, fetched once and kept. */
@@ -221,6 +347,7 @@ function distance(a: { lat: number; lng: number }, b: { lat: number; lng: number
 function progressOf(phase: Phase, info: FlightInfo, from: Airport | null, to: Airport | null, departs: number | null, arrives: number | null, now: number) {
   if (phase === "landed") return 1;
   if (phase !== "airborne") return null;
+  if (info.progress !== undefined) return Math.min(1, Math.max(0, info.progress / 100));
   if (info.lat !== undefined && info.lng !== undefined && from?.lat != null && from.lng != null && to?.lat != null && to.lng != null) {
     const here = { lat: info.lat, lng: info.lng };
     const done = distance({ lat: from.lat, lng: from.lng }, here);
@@ -232,14 +359,16 @@ function progressOf(phase: Phase, info: FlightInfo, from: Airport | null, to: Ai
 }
 
 /**
- * Where a flight is now, from what AirLabs said and where it was before. AirLabs always answers with
+ * Where a flight is now, from what the service said and where it was before. A FlightAware answer is
+ * about the very flight being followed, so it's taken as it is. AirLabs always answers with
  * the nearest flight with that number, so once one lands it can move on to tomorrow's: anything that
  * was in the air and isn't any more has landed.
  */
 export function phaseFrom(info: FlightInfo, prev: Phase, addedAt: number, arrives: number | null, now: number): Phase {
   const s = info.status;
   // Yesterday's landed flight doesn't count as today's having landed.
-  if (s === "landed" && (prev === "airborne" || (arrives !== null && arrives > addedAt))) return "landed";
+  if (s === "landed" && (info.pinned || prev === "airborne" || (arrives !== null && arrives > addedAt))) return "landed";
+  if (info.pinned) return s === "en-route" ? "airborne" : "scheduled";
   const live = info.lat !== undefined && info.lng !== undefined && (info.seenAt === undefined || now - info.seenAt < 30 * 60_000);
   if (s === "en-route" || (!s && live)) return "airborne";
   if (prev === "airborne") {
@@ -253,6 +382,7 @@ export function phaseFrom(info: FlightInfo, prev: Phase, addedAt: number, arrive
 type Row = {
   id: string;
   code: string;
+  ref: string | null;
   phase: Phase;
   info: string | null;
   error: string | null;
@@ -263,7 +393,7 @@ type Row = {
   added_by_name: string | null;
 };
 
-const SELECT = `SELECT f.id, f.code, f.phase, f.info, f.error, f.delay_told, f.checked_at, f.landed_at, f.created_at, u.name AS added_by_name
+const SELECT = `SELECT f.id, f.code, f.ref, f.phase, f.info, f.error, f.delay_told, f.checked_at, f.landed_at, f.created_at, u.name AS added_by_name
   FROM flights f LEFT JOIN users u ON u.id = f.added_by`;
 
 function parseInfo(json: string | null): FlightInfo | null {
@@ -311,15 +441,14 @@ export async function addFlight(input: string, userId: string) {
   if (count >= MAX_FLIGHTS) throw new FlightError(`You can watch up to ${MAX_FLIGHTS} flights at once. Remove one first.`);
   if (db().prepare("SELECT 1 FROM flights WHERE code = ?").get(parsed.code)) throw new FlightError(`${display(parsed.code)} is already on the list.`);
 
-  const info = await lookup(parsed.code);
-  await Promise.all([airport(info.dep), airport(info.arr)]);
+  const { info, ref } = await lookup(parsed.code, null);
   const now = Date.now();
   const id = randomUUID();
   const { arrives } = times(info, getAirport(info.dep), getAirport(info.arr));
   const phase = phaseFrom(info, "scheduled", now, arrives, now);
   db().prepare(
-    `INSERT INTO flights (id, code, added_by, phase, info, delay_told, checked_at, landed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, parsed.code, userId, phase, JSON.stringify(info), info.depDelay ?? 0, now, phase === "landed" ? now : null, now);
+    `INSERT INTO flights (id, code, ref, added_by, phase, info, delay_told, checked_at, landed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, parsed.code, ref, userId, phase, JSON.stringify(info), info.depDelay ?? 0, now, phase === "landed" ? now : null, now);
   return id;
 }
 
@@ -329,7 +458,7 @@ export function removeFlight(id: string) {
 
 /** How long to wait between checks, or null to stop: often while it's flying or about to, rarely before. */
 function checkEvery(f: Flight, now: number) {
-  if (f.phase === "landed") return null;
+  if (f.phase === "landed" || f.info?.status === "cancelled") return null;
   if (f.phase === "airborne") return 5 * 60_000;
   if (f.departs !== null && f.departs - now > 3 * 3_600_000) return 60 * 60_000;
   // Close to leaving, or we can't tell when it leaves.
@@ -337,7 +466,7 @@ function checkEvery(f: Flight, now: number) {
 }
 
 export type FlightChange =
-  | { kind: "took-off" | "landed"; flight: Flight }
+  | { kind: "took-off" | "landed" | "cancelled"; flight: Flight }
   | { kind: "delayed"; flight: Flight; minutes: number };
 
 let checking = false;
@@ -355,9 +484,9 @@ export async function checkFlights(now = Date.now()): Promise<FlightChange[]> {
       if (every === null || (row.checked_at !== null && now - row.checked_at < every)) continue;
 
       let info: FlightInfo;
+      let ref: string | null;
       try {
-        info = await lookup(row.code);
-        await Promise.all([airport(info.dep), airport(info.arr)]);
+        ({ info, ref } = await lookup(row.code, row.ref));
       } catch (error) {
         const message = error instanceof FlightError ? error.message : "Couldn't check it.";
         db().prepare("UPDATE flights SET error = ?, checked_at = ? WHERE id = ?").run(message, now, row.id);
@@ -370,6 +499,7 @@ export async function checkFlights(now = Date.now()): Promise<FlightChange[]> {
       const delay = keep.depDelay ?? 0;
       let told = row.delay_told;
       if (row.phase === "scheduled" && next === "airborne") changes.push({ kind: "took-off", flight: after });
+      else if (keep.status === "cancelled" && before.info?.status !== "cancelled") changes.push({ kind: "cancelled", flight: after });
       else if (row.phase !== "landed" && next === "landed") changes.push({ kind: "landed", flight: after });
       // Only worth a notification when it's late by another quarter of an hour or more.
       else if (next === "scheduled" && delay >= 15 && delay - told >= 15) {
@@ -377,8 +507,8 @@ export async function checkFlights(now = Date.now()): Promise<FlightChange[]> {
         told = delay;
       }
       db().prepare(
-        "UPDATE flights SET phase = ?, info = ?, error = NULL, checked_at = ?, landed_at = COALESCE(landed_at, ?), delay_told = ? WHERE id = ?",
-      ).run(next, JSON.stringify(keep), now, next === "landed" ? now : null, told, row.id);
+        "UPDATE flights SET phase = ?, info = ?, ref = ?, error = NULL, checked_at = ?, landed_at = COALESCE(landed_at, ?), delay_told = ? WHERE id = ?",
+      ).run(next, JSON.stringify(keep), ref, now, next === "landed" ? now : null, told, row.id);
     }
     return changes;
   } finally {
