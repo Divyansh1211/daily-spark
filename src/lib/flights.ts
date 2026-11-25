@@ -32,6 +32,9 @@ export type FlightInfo = {
   arrAt?: number;
   depEstAt?: number;
   arrEstAt?: number;
+  /** Each airport's offset from UTC (minutes), for when its time zone isn't known. */
+  depOffset?: number;
+  arrOffset?: number;
   depDelay?: number; // minutes
   arrDelay?: number;
   depTerminal?: string;
@@ -215,7 +218,8 @@ async function call(path: string, params: Record<string, string>): Promise<unkno
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   url.searchParams.set("api_key", process.env.AIRLABS_API_KEY!);
   const { res, json } = await getJson(url, {});
-  const error = json?.error as { message?: string } | undefined;
+  const error = json?.error as { message?: string; code?: string } | undefined;
+  if (error?.code === "not_found") return null;
   if (error) throw new FlightError(String(error.message ?? "The flight service said no.").slice(0, 160));
   if (!res.ok || !json) throw new FlightError(`The flight service answered ${res.status}.`);
   return json.response;
@@ -224,6 +228,13 @@ async function call(path: string, params: Record<string, string>): Promise<unkno
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : typeof v === "number" ? String(v) : undefined);
 const ms = (v: unknown) => (num(v) !== undefined ? num(v)! * 1000 : undefined);
+
+/** Minutes between an airport's local "2026-11-25 21:30" and the same moment in UTC. */
+function offset(local: unknown, utc: unknown) {
+  const a = Date.parse(`${str(local)?.replace(" ", "T")}Z`);
+  const b = Date.parse(`${str(utc)?.replace(" ", "T")}Z`);
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.round((a - b) / 60_000) : undefined;
+}
 
 /** The fields we use from an AirLabs flight, leaving out anything it didn't send. */
 function toInfo(r: Record<string, unknown>): FlightInfo {
@@ -239,6 +250,8 @@ function toInfo(r: Record<string, unknown>): FlightInfo {
     arrAt: ms(r.arr_time_ts),
     depEstAt: ms(r.dep_actual_ts) ?? ms(r.dep_estimated_ts),
     arrEstAt: ms(r.arr_actual_ts) ?? ms(r.arr_estimated_ts),
+    depOffset: offset(r.dep_time, r.dep_time_utc),
+    arrOffset: offset(r.arr_time, r.arr_time_utc),
     depDelay: num(r.dep_delayed),
     arrDelay: num(r.arr_delayed),
     depTerminal: str(r.dep_terminal),
@@ -265,8 +278,13 @@ async function airLabs(code: string): Promise<FlightInfo> {
   if (!response || typeof response !== "object" || Array.isArray(response) || Object.keys(response).length === 0) {
     throw new FlightError(`Couldn't find ${display(parsed.code)}. Check the number, or try again closer to the day.`);
   }
-  const info = toInfo(response as Record<string, unknown>);
+  const r = response as Record<string, unknown>;
+  const info = toInfo(r);
   await Promise.all([airport(info.dep), airport(info.arr)]);
+  // The airports list leaves out the city, but the flight has it.
+  const city = db().prepare("UPDATE airports SET city = COALESCE(city, ?) WHERE iata = ?");
+  if (info.dep && str(r.dep_city)) city.run(str(r.dep_city)!, info.dep);
+  if (info.arr && str(r.arr_city)) city.run(str(r.arr_city)!, info.arr);
   return info;
 }
 

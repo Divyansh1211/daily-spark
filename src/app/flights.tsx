@@ -171,8 +171,8 @@ function FlightCard({ flight, now, onChange }: { flight: Flight; now: number; on
       </div>
 
       <div className="mt-4 flex items-start justify-between gap-3">
-        <End airport={flight.from} at={flight.departs} local={info.depEstLocal ?? info.depLocal} now={now} />
-        <End airport={flight.to} at={flight.arrives} local={info.arrEstLocal ?? info.arrLocal} now={now} right />
+        <End airport={flight.from} at={flight.departs} offset={info.depOffset} local={info.depEstLocal ?? info.depLocal} now={now} />
+        <End airport={flight.to} at={flight.arrives} offset={info.arrOffset} local={info.arrEstLocal ?? info.arrLocal} now={now} right />
       </div>
 
       <Route progress={flight.progress} phase={flight.phase} />
@@ -210,10 +210,29 @@ function FlightCard({ flight, now, onChange }: { flight: Flight; now: number; on
 }
 
 /** One end of the trip: the airport, and the time there and on this phone. */
-function End({ airport, at, local, now, right = false }: { airport: Airport | null; at: number | null; local?: string; now: number; right?: boolean }) {
+function End({
+  airport,
+  at,
+  offset,
+  local,
+  now,
+  right = false,
+}: {
+  airport: Airport | null;
+  at: number | null;
+  offset?: number;
+  local?: string;
+  now: number;
+  right?: boolean;
+}) {
   const here = at ? clock(at, now) : null;
   // The time at the airport, when it's different from this phone's.
-  const there = at && airport?.tz ? airportClock(at, airport.tz) : (local?.slice(11, 16) ?? null);
+  const there =
+    at && airport?.tz
+      ? airportClock(at, airport.tz)
+      : at && offset !== undefined
+        ? airportClock(at, "UTC", offset)
+        : (local?.slice(11, 16) ?? null);
   return (
     <div className={`min-w-0 ${right ? "text-right" : ""}`}>
       <p className="font-serif text-3xl leading-none">{airport?.code ?? "—"}</p>
@@ -269,11 +288,14 @@ function clock(ms: number, now: number, timeZone?: string) {
   return `${new Date(ms).toLocaleDateString(undefined, { weekday: "short", timeZone })} ${time}`;
 }
 
-/** "3:40 AM" at the airport, with the day when it's a different date there than on this phone. */
-function airportClock(ms: number, timeZone: string) {
-  const d = new Date(ms);
+/**
+ * "3:40 AM" at the airport, with the day when it's a different date there than on this phone.
+ * Without the airport's time zone, its offset from UTC (minutes) does the same job.
+ */
+function airportClock(ms: number, timeZone: string, shift = 0) {
+  const d = new Date(ms + shift * 60_000);
   const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZone });
-  if (d.toLocaleDateString("en-CA", { timeZone }) === d.toLocaleDateString("en-CA")) return time;
+  if (d.toLocaleDateString("en-CA", { timeZone }) === new Date(ms).toLocaleDateString("en-CA")) return time;
   return `${d.toLocaleDateString(undefined, { weekday: "short", timeZone })} ${time}`;
 }
 
